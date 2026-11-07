@@ -149,7 +149,10 @@ def read_file(path: str, start_line: int = 1, end_line: int = 0) -> str:
     - end_line (1-indexed, inclusive): Ending line number to read (default: 0 = to end of file).
     """
 
-    target = safe_path(path)
+    try:
+        target = safe_path(path)
+    except ValueError as exc:
+        return f"ERROR: {exc}"
 
     if not target.exists():
         return f"ERROR: File does not exist: {path}"
@@ -191,7 +194,10 @@ def read_file(path: str, start_line: int = 1, end_line: int = 0) -> str:
 def list_directory(path: str = ".") -> str:
     """List files and directories inside the workspace."""
 
-    target = safe_path(path)
+    try:
+        target = safe_path(path)
+    except ValueError as exc:
+        return f"ERROR: {exc}"
 
     if not target.exists():
         return f"ERROR: Directory does not exist: {path}"
@@ -240,7 +246,10 @@ def search_files(
     if not isinstance(query, str) or not query.strip():
         return "ERROR: Search query cannot be empty."
 
-    target = safe_path(path)
+    try:
+        target = safe_path(path)
+    except ValueError as exc:
+        return f"ERROR: {exc}"
 
     if not target.exists():
         return f"ERROR: Path does not exist: {path}"
@@ -532,7 +541,10 @@ def run_tests(test_path: str = "") -> str:
         output = output[:4000] + "\n\n[TRUNCATED: output exceeded 4,000 characters]"
 
     status = "PASSED" if res.returncode == 0 else f"FAILED (exit code {res.returncode})"
-    return f"TEST SUITE {status}:\n{output}"
+    result_text = f"TEST SUITE {status}:\n{output}"
+    if res.returncode == 5 and (workspace / "package.json").exists():
+        result_text += "\n\n(Note: No pytest tests found. This workspace appears to be a Node.js project containing package.json)"
+    return result_text
 
 
 # ============================================================

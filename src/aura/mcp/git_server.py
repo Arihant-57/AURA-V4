@@ -17,6 +17,7 @@ from __future__ import annotations
 import os
 import subprocess
 from pathlib import Path
+from typing import Any
 
 from mcp.server import MCPServer
 
@@ -69,9 +70,19 @@ def run_git(*args: str) -> str:
     if not repo.is_dir():
         return f"ERROR: Repository does not exist: {repo}"
 
-    git_dir = repo / ".git"
+    is_git_repo = (repo / ".git").exists()
+    if not is_git_repo:
+        try:
+            is_git_repo = (
+                subprocess.run(
+                    ["git", "-C", str(repo), "rev-parse", "--is-inside-work-tree"],
+                    capture_output=True,
+                ).returncode == 0
+            )
+        except Exception:
+            is_git_repo = False
 
-    if not git_dir.exists():
+    if not is_git_repo:
         return f"ERROR: Not a Git repository: {repo}"
 
     try:

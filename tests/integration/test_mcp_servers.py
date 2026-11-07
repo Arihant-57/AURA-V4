@@ -73,7 +73,8 @@ class TestMCPFilesystemServer(unittest.TestCase):
                 result = await client.call_tool("read_file", {"path": "../"})
                 return result
         result = asyncio.run(run())
-        self.assertTrue(result.is_error)
+        content = result.content[0].text if result.content else ""
+        self.assertTrue(result.is_error or "ERROR:" in content)
 
     def test_write_and_edit_file_mcp(self):
         scratch_rel = "test_scratch_mcp_integration.txt"
@@ -160,7 +161,8 @@ class TestMCPFilesystemServer(unittest.TestCase):
                 result = await client.call_tool("read_file", {"path": abs_path})
                 return result
         result = asyncio.run(run())
-        self.assertTrue(result.is_error)
+        content = result.content[0].text if result.content else ""
+        self.assertTrue(result.is_error or "ERROR:" in content)
 
 
 class TestMCPGitServerWithTempRepo(unittest.TestCase):
