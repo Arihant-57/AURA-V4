@@ -213,7 +213,8 @@ class TestRunAgentLoop:
         memory = SessionMemory()
 
         result = await run_agent_loop("test", provider, hub, memory, cache)
-        assert "Maximum steps reached" in result
+        # ExecutionController stops on repeated calls or budget exhaustion
+        assert "Steps:" in result or "consecutive" in result.lower()
 
     @pytest.mark.asyncio
     async def test_loop_max_steps_forces_synthesis(self):
@@ -252,7 +253,8 @@ class TestRunAgentLoop:
         memory = SessionMemory()
 
         result = await run_agent_loop("test", provider, hub, memory, cache)
-        assert "Maximum steps reached" in result
+        # Budget exhausted with forced synthesis
+        assert "Steps:" in result
         assert "Found test configuration across files" in result
 
 

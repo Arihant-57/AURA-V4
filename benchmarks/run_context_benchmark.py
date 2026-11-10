@@ -11,7 +11,7 @@ import sys
 import time
 from pathlib import Path
 
-WORKSPACE = Path(r"C:\Users\ariha\local-ai-lab\phase4-agent")
+WORKSPACE = Path(os.environ.get("AURA_WORKSPACE", Path(__file__).resolve().parent.parent))
 os.environ["AURA_WORKSPACE"] = str(WORKSPACE)
 sys.path.insert(0, str(WORKSPACE))
 

@@ -1,6 +1,74 @@
+# Bytecode & Python Cache
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual Environments
+.venv/
+venv/
+ENV/
+env/
+env.bak/
+venv.bak/
+
+# Environment Variables & Secrets
+.env
+.env.*
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+!.env.example
+
+# IDE & Editor Configs
+.vscode/
+.idea/
+.claude/
+*.swp
+*.swo
+*~
+
+# Operating System Files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Testing & Coverage Artifacts
 .pytest_cache/
-*.zip
-.env*
+.coverage
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+
+# Ephemeral Sandboxes & Scratch Directories
 test-sandboxes/
+test_sandbox*/
+test_tmp*/
+scratch/
+traces/
+reports/
+
+# Archives & Temporary Files
+*.zip
+*.tar.gz
+*.tgz
+*.rar
+*.7z
+*.tmp
+*.bak
+*.log
+
+# Model files & weights (Local LLMs)
+models/
+*.gguf
+*.bin
+*.safetensors
+*.onnx
+
+# Local Databases
+*.db
+*.sqlite
+*.sqlite3

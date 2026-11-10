@@ -11,8 +11,10 @@ import json
 from pathlib import Path
 
 # Workspace
-os.environ["AURA_WORKSPACE"] = r"C:\Users\ariha\local-ai-lab\phase4-agent"
-sys.path.insert(0, r'C:\Users\ariha\local-ai-lab\phase4-agent')
+_DEFAULT_WS = str(Path(__file__).resolve().parent)
+os.environ.setdefault("AURA_WORKSPACE", _DEFAULT_WS)
+if _DEFAULT_WS not in sys.path:
+    sys.path.insert(0, _DEFAULT_WS)
 
 from src.aura.core import McpHub, SessionMemory, ResultCache, TaskScope
 from src.aura.core.providers import ProviderFactory
@@ -25,7 +27,7 @@ async def run_phase_g_enhanced():
     print("PHASE G: REAL LOCAL END-TO-END VERIFICATION (Enhanced)")
     print("=" * 70)
 
-    workspace = Path(r"C:\Users\ariha\local-ai-lab\phase4-agent")
+    workspace = Path(os.environ.get("AURA_WORKSPACE", _DEFAULT_WS))
     start_time = time.time()
 
     # 1. Start MCP Hub

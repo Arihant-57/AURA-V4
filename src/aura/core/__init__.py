@@ -19,6 +19,15 @@ from .evidence import (
     collect_prefetch_evidence, select_prefetch_policy
 )
 from .validators import validate_diagnosis_answer, validate_control_flow
+from .model_registry import ModelRegistry, ModelCapability, ModelRole
+from .model_router import ModelRouter, TaskState, TaskStage, classify_task_role, needs_multi_stage
+from .execution_controller import ExecutionController
+from .file_tracker import InspectionTracker, FileInspection
+from .orchestrator import run_multi_stage
+from .error_classifier import (
+    ErrorCategory, ClassifiedResult, classify_tool_result,
+    classify_error_message, is_tool_error_text,
+)
 
 __all__ = [
     "TaskScope",
@@ -46,4 +55,21 @@ __all__ = [
     "select_prefetch_policy",
     "validate_diagnosis_answer",
     "validate_control_flow",
+    "ModelRegistry",
+    "ModelCapability",
+    "ModelRole",
+    "ModelRouter",
+    "TaskState",
+    "TaskStage",
+    "classify_task_role",
+    "needs_multi_stage",
+    "ExecutionController",
+    "InspectionTracker",
+    "FileInspection",
+    "run_multi_stage",
+    "ErrorCategory",
+    "ClassifiedResult",
+    "classify_tool_result",
+    "classify_error_message",
+    "is_tool_error_text",
 ]

@@ -9,11 +9,16 @@ import asyncio
 import os
 import sys
 from pathlib import Path
+from typing import Any
 
 from ..config import get_settings, resolve_workspace
 from ..config.workspace import normalize_workspace_path, find_referenced_directory
 from ..core import McpHub, SessionMemory, ResultCache
 from ..core.providers import ProviderFactory
+from ..core.model_registry import ModelRegistry, ModelRole
+from ..core.model_router import ModelRouter, classify_task_role, needs_multi_stage, TaskState, TaskStage
+from ..core.scope import TaskScope
+from ..core.orchestrator import run_multi_stage
 from .loop import run_agent_loop
 
 
@@ -44,7 +49,7 @@ def prompt_confirm(prompt_text: str, auto_confirm: bool = False) -> bool:
         return False
 
 
-def print_status(hub: McpHub, provider, memory: SessionMemory):
+def print_status(hub: McpHub, provider, memory: SessionMemory, router: ModelRouter | None = None):
     """Print formatted session status."""
     mode_str = "read-only (ro)" if getattr(hub, "read_only", False) else "read-write (rw)"
     print("\n" + "=" * 40)
@@ -52,6 +57,8 @@ def print_status(hub: McpHub, provider, memory: SessionMemory):
     print(f"Workspace Root  : {hub.workspace}")
     print(f"Access Mode     : {mode_str}")
     print(f"Model           : {provider.model} (context: {provider.default_options.num_ctx})")
+    if router:
+        print(f"Available Models: {', '.join(router.registry.available_names) or 'unknown'}")
     print(f"Connected Tools : {len(hub.tools)} ({', '.join(sorted(hub.clients.keys()))})")
     dirs = sorted(memory.dirs.keys())
     print(f"Inspected Dirs  : {len(dirs)} ({', '.join(dirs[:5]) + ('...' if len(dirs) > 5 else '') or 'none'})")
@@ -68,11 +75,105 @@ def print_help():
 Available Commands:
   /workspace <path> (or /cd)  Switch active workspace (prompts for authorization)
   /mode [ro|rw]               Toggle access mode (ro = read-only, rw = read-write)
+  /models                     Show available models and role assignments
   /status (or /info)          Display current workspace, mode, and session stats
   /reset                      Clear session memory and cache
   /help                       Show this help message
   exit (or quit)              Shut down MCP servers and exit
 """)
+
+
+def format_task_metrics(providers: list[Any]) -> str:
+    """Format token evaluation metrics from the providers actually used in the task."""
+    if not providers:
+        return "[Metrics: unavailable]"
+
+    unique_providers = []
+    seen = set()
+    for p in providers:
+        if p is not None and id(p) not in seen:
+            seen.add(id(p))
+            unique_providers.append(p)
+
+    if not unique_providers:
+        return "[Metrics: unavailable]"
+
+    if len(unique_providers) == 1:
+        p = unique_providers[0]
+        prompt_eval = p.last_prompt_eval_count if getattr(p, "last_prompt_eval_count", None) is not None else "unavailable"
+        eval_tok = p.last_eval_count if getattr(p, "last_eval_count", None) is not None else "unavailable"
+        total_prompt = getattr(p, "total_prompt_eval_count", 0)
+        opts = getattr(p, "default_options", None)
+        ctx = getattr(opts, "num_ctx", "unknown") if opts else "unknown"
+        m_name = getattr(p, "model", "unknown")
+        return (
+            f"[Metrics ({m_name}): prompt_eval_tokens={prompt_eval}, "
+            f"eval_tokens={eval_tok}, total_prompt_tokens={total_prompt}, num_ctx={ctx}]"
+        )
+
+    total_prompt = sum(getattr(p, "total_prompt_eval_count", 0) for p in unique_providers)
+    total_eval = sum(getattr(p, "total_eval_count", 0) for p in unique_providers)
+
+    breakdowns = []
+    for p in unique_providers:
+        m_name = getattr(p, "model", "unknown")
+        p_prompt = getattr(p, "total_prompt_eval_count", 0)
+        p_eval = getattr(p, "total_eval_count", 0)
+        breakdowns.append(f"{m_name}(prompt={p_prompt}, eval={p_eval})")
+
+    return (
+        f"[Metrics (multi-stage): total_prompt_tokens={total_prompt}, "
+        f"total_eval_tokens={total_eval}, breakdown=[{', '.join(breakdowns)}]]"
+    )
+
+
+def _select_provider_for_task(
+    task: str,
+    router: ModelRouter,
+    default_provider: object,
+    ctx_override: int | None,
+) -> object:
+    """Pick the right OllamaProvider for this task's classified role."""
+    scope = TaskScope(task)
+    role = classify_task_role(task, scope)
+    model_name = router.select(role)
+
+    # Reuse existing provider if model matches (avoids re-creating)
+    if model_name == getattr(default_provider, "model", None):
+        return default_provider
+
+    return ProviderFactory.create_ollama(model=model_name, num_ctx=ctx_override)
+
+
+async def _run_task(
+    task: str,
+    router: ModelRouter,
+    default_provider: object,
+    hub: McpHub,
+    memory: SessionMemory,
+    cache: ResultCache,
+    ctx_override: int | None,
+) -> tuple[str, list[object]]:
+    """Run a task using single-pass or multi-stage depending on complexity."""
+    scope = TaskScope(task)
+    if needs_multi_stage(task, scope):
+        print(f"  [multi-stage: analysis -> coding -> verification]")
+        state = TaskState(
+            original_request=task,
+            workspace=str(getattr(hub, "workspace", "")),
+            read_only=getattr(hub, "read_only", True),
+            stage=TaskStage.ANALYSIS,
+        )
+        answer = await run_multi_stage(
+            task, router, hub, memory, cache,
+            ctx_override=ctx_override,
+            task_state=state,
+        )
+        return answer, state.used_providers
+    else:
+        task_provider = _select_provider_for_task(task, router, default_provider, ctx_override)
+        answer = await run_agent_loop(task, task_provider, hub, memory, cache)
+        return answer, [task_provider]
 
 
 async def main():
@@ -105,8 +206,22 @@ async def main():
     hub = McpHub(workspace_path, read_only=initial_read_only)
     await hub.start()
 
-    provider = ProviderFactory.create_ollama(model=args.model, num_ctx=args.ctx)
+    # Initialize model registry and router
+    registry = ModelRegistry()
+    registry.refresh()
+    router = ModelRouter(registry=registry)
+
+    # CLI --model override locks all roles to that model
+    cli_model = args.model
+    if cli_model:
+        router.set_override(cli_model)
+
+    # Create default provider using the router's lightweight selection
+    default_model = router.select(ModelRole.LIGHTWEIGHT) if not cli_model else cli_model
+    provider = ProviderFactory.create_ollama(model=default_model, num_ctx=args.ctx)
     print(f"AURA V4: Model={provider.model}, num_ctx={provider.default_options.num_ctx}")
+    if registry.models:
+        print(f"AURA V4: {len(registry.models)} model(s) available: {', '.join(registry.available_names)}")
     if not provider.is_model_available():
         print(f"Warning: Model {provider.model} might not be pulled in Ollama.")
 
@@ -116,15 +231,19 @@ async def main():
     task_input = args.task or (" ".join(args.query).strip() if args.query else None)
     if task_input:
         try:
+            scope = TaskScope(task_input)
+            if needs_multi_stage(task_input, scope):
+                print(f"\n[Multi-stage task detected]")
             print(f"\n[Thinking...]")
-            answer = await run_agent_loop(task_input, provider, hub, memory, cache)
+            answer, active_providers = await _run_task(
+                task_input, router, provider, hub, memory, cache, args.ctx,
+            )
             try:
                 print(f"\nAURA: {answer}")
             except UnicodeEncodeError:
                 safe_answer = answer.encode('ascii', 'replace').decode('ascii')
                 print(f"\nAURA: {safe_answer}")
-            if provider.last_prompt_eval_count is not None:
-                print(f"\n[Metrics: prompt_eval_tokens={provider.last_prompt_eval_count}, eval_tokens={provider.last_eval_count}, total_prompt_tokens={provider.total_prompt_eval_count}, num_ctx={provider.default_options.num_ctx}]")
+            print(f"\n{format_task_metrics(active_providers)}")
         finally:
             await hub.close()
         return
@@ -151,13 +270,20 @@ async def main():
                 continue
 
             if task_lower in ("/status", "/info"):
-                print_status(hub, provider, memory)
+                print_status(hub, provider, memory, router)
                 continue
 
             if task_lower == "/reset":
                 memory.clear()
                 cache.clear()
                 print("Session memory and cache cleared.")
+                continue
+
+            if task_lower == "/models":
+                print(f"\n{registry.describe()}")
+                for role in ModelRole:
+                    print(f"  {role.value:15s} -> {router.select(role)}")
+                print()
                 continue
 
             if task_lower.startswith("/mode"):
@@ -237,15 +363,20 @@ async def main():
                     cache.clear()
                     print(f"[Workspace switched to: {referenced_dir}] (read-only)")
 
+            # Run task (auto-selects single-pass or multi-stage)
+            scope = TaskScope(task)
+            if needs_multi_stage(task, scope):
+                print(f"\n[Multi-stage task detected]")
             print(f"\n[Thinking...]")
-            answer = await run_agent_loop(task, provider, hub, memory, cache)
+            answer, active_providers = await _run_task(
+                task, router, provider, hub, memory, cache, args.ctx,
+            )
             try:
                 print(f"\nAURA: {answer}")
             except UnicodeEncodeError:
                 safe_answer = answer.encode('ascii', 'replace').decode('ascii')
                 print(f"\nAURA: {safe_answer}")
-            if provider.last_prompt_eval_count is not None:
-                print(f"\n[Metrics: prompt_eval_tokens={provider.last_prompt_eval_count}, eval_tokens={provider.last_eval_count}, total_prompt_tokens={provider.total_prompt_eval_count}, num_ctx={provider.default_options.num_ctx}]")
+            print(f"\n{format_task_metrics(active_providers)}")
     finally:
         await hub.close()
 

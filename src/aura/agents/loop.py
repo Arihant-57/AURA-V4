@@ -25,9 +25,12 @@ from ..core import (
     select_active_tools, check_path_policy, sanitize_tool_result,
     mcp_tool_to_ollama, mcp_result_to_text, validate_arguments,
     normalize_tool_arguments, validate_diagnosis_answer, validate_control_flow,
-    is_prefetch_candidate, collect_prefetch_evidence, evidence_is_sufficient
+    is_prefetch_candidate, collect_prefetch_evidence, evidence_is_sufficient,
+    ExecutionController, InspectionTracker,
+    ErrorCategory, classify_tool_result, is_tool_error_text,
 )
 from ..core.providers import OllamaProvider
+from ..core.model_router import TaskState, TaskStage
 from ..core.prompts import (
     SYSTEM_PROMPT, DIAGNOSIS_NUDGE_MESSAGE, CHANGE_PLAN_NUDGE_MESSAGE,
     FALLBACK_NUDGE_MESSAGE
@@ -271,11 +274,26 @@ async def run_agent_loop(
     provider: OllamaProvider,
     hub: McpHub,
     memory: SessionMemory,
-    cache: ResultCache
+    cache: ResultCache,
+    *,
+    task_state: TaskState | None = None,
+    inspection_tracker: InspectionTracker | None = None,
 ) -> str:
     """The main reasoning loop."""
     settings = get_settings()
     scope = TaskScope(task)
+    controller = ExecutionController(
+        max_steps=settings.agent.max_steps,
+        extension_budget=max(3, settings.agent.max_steps // 2),
+    )
+    if inspection_tracker is None:
+        inspection_tracker = InspectionTracker()
+    if task_state is None:
+        task_state = TaskState(
+            original_request=task,
+            workspace=str(getattr(hub, "workspace", "")),
+            read_only=getattr(hub, "read_only", True),
+        )
 
     # Recover any broken MCP servers from previous tasks
     if getattr(hub, "broken", None):
@@ -376,7 +394,9 @@ async def run_agent_loop(
                 except Exception as e:
                     logger.warning("Prefetch single-synthesis failed: %s; continuing in agent loop.", e)
 
-    for step in range(settings.agent.max_steps):
+    for step in range(settings.agent.max_steps + controller.extension_budget):
+        if not controller.should_continue:
+            break
         # Call model with retry on transient errors only
         response = None
         messages_to_send = prune_conversation_history(messages, settings)
@@ -471,9 +491,12 @@ async def run_agent_loop(
 
             # Execute tool calls sequentially
             turn_has_path_error = False
+            turn_has_exec_error = False
+            turn_useful = False
             last_turn_error = ""
             for name, args in tool_calls:
                 sig = (name, json.dumps(args, sort_keys=True))
+                is_repeat = sig in executed_calls
                 res_text, meta = await execute_tool_call(
                     name, args, step,
                     active_tool_names=active_tool_names, hub=hub, cache=cache,
@@ -485,10 +508,48 @@ async def run_agent_loop(
                     "name": name,
                     "content": res_text,
                 })
+
                 lowered_res = res_text.lower()
-                if "does not exist" in lowered_res or "outside the project workspace" in lowered_res:
+                is_missing_path = "does not exist" in lowered_res
+                is_boundary_error = (
+                    "outside the project workspace" in lowered_res
+                    or "absolute paths are not allowed" in lowered_res
+                    or "invalid path" in lowered_res
+                )
+
+                if is_missing_path or is_boundary_error:
                     turn_has_path_error = True
                     last_turn_error = res_text
+
+                # Classify the outcome into inspection notice, execution error, or defect
+                if is_tool_error_text(res_text) or meta.get("error") or meta.get("blocked"):
+                    classified = classify_tool_result(name, res_text, args, meta)
+                    if classified.category == ErrorCategory.INSPECTION_NOTICE:
+                        task_state.add_inspection_notice(f"{name}: {classified.message}")
+                        if not is_repeat:
+                            turn_useful = True
+                    elif classified.category == ErrorCategory.EXECUTION_ERROR:
+                        turn_has_exec_error = True
+                        task_state.add_execution_error(f"{name}: {classified.message}")
+                    elif classified.category == ErrorCategory.TASK_DEFECT:
+                        task_state.add_defect(f"{name}: {classified.message}")
+                else:
+                    if not meta.get("error") and not is_repeat:
+                        turn_useful = True
+
+                # Track file inspection ranges for successful reads
+                if name == "read_file" and not meta.get("error") and not is_missing_path:
+                    _track_read_file(res_text, args.get("path", ""), inspection_tracker)
+
+            # Update controller
+            controller.tick(
+                useful=turn_useful and not turn_has_exec_error,
+                repeated=is_duplicate_only,
+                failed=turn_has_exec_error and not turn_useful,
+            )
+            task_state.record_tool_call(
+                useful=turn_useful, repeated=is_duplicate_only,
+            )
 
             if turn_has_path_error:
                 consecutive_failed_turns += 1
@@ -588,15 +649,18 @@ async def run_agent_loop(
                     )
                 })
 
-    # If all max_steps are exhausted without returning an answer
+    # Loop ended — either budget exhausted or controller stopped
+    reason = controller.stop_reason or "budget_exhausted"
+    logger.info("Agent loop ended: %s. %s", reason, controller.summary())
+
     if settings.agent.force_final_answer:
         tool_results = [m for m in messages if m.get("role") == "tool"]
         if tool_results:
-            logger.info("Max steps reached (%d); forcing synthesis from gathered results.", settings.agent.max_steps)
+            logger.info("Forcing synthesis from gathered results.")
             forced_answer = await _force_answer_from_evidence(messages, provider, scope)
             if forced_answer and not forced_answer.startswith("I have no information"):
-                return f"Maximum steps reached. Summary of actions and results:\n{forced_answer}"
-    return "Maximum steps reached without final answer."
+                return f"[{controller.summary()}]\n{forced_answer}"
+    return f"Task incomplete ({reason}). {controller.summary()}"
 
 
 async def _force_answer_from_evidence(
@@ -645,3 +709,18 @@ async def _force_answer_from_evidence(
         logger.warning("Force-answer synthesis failed: %s", e)
 
     return f"Based on tool results:\n{evidence_text}"
+
+
+def _track_read_file(result_text: str, path: str, tracker: InspectionTracker) -> None:
+    """Parse read_file output to track inspection ranges."""
+    if not path or not result_text:
+        return
+    # Format: "Showing lines X-Y of Z\n..."
+    import re
+    m = re.search(r"Showing lines (\d+)-(\d+) of (\d+)", result_text)
+    if m:
+        tracker.record(path, int(m.group(1)), int(m.group(2)), int(m.group(3)))
+    else:
+        # Heuristic: count newlines as a rough line count
+        lines = result_text.count("\n") + 1
+        tracker.record(path, 1, lines)
