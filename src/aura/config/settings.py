@@ -120,6 +120,7 @@ class AgentSettings:
     max_diagnosis_nudges: int = 1
     max_change_plan_nudges: int = 1
     mcp_tool_timeout_seconds: int = 30
+    model_call_timeout_seconds: int = 60
     model_call_attempts: int = 3
     model_retry_delay_seconds: float = 2.0
     cache_ttl_seconds: float = 300.0
@@ -128,6 +129,7 @@ class AgentSettings:
 
     def __post_init__(self):
         self.max_steps = int(os.environ.get("AGENT_MAX_STEPS", str(self.max_steps)))
+        self.model_call_timeout_seconds = int(os.environ.get("AGENT_MODEL_TIMEOUT", str(self.model_call_timeout_seconds)))
         self.debug = os.environ.get("AGENT_DEBUG") == "1"
 
 

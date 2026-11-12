@@ -411,7 +411,7 @@ async def run_agent_loop(
                     await asyncio.sleep(settings.agent.model_retry_delay_seconds)
                 else:
                     return f"Error: Failed to get model response after {settings.agent.model_call_attempts} attempts: {e}"
-            except asyncio.TimeoutError as e:
+            except (TimeoutError, asyncio.TimeoutError) as e:
                 # Transient: operation timeout
                 logger.warning("Model call attempt %d failed (TimeoutError): %s", attempt + 1, e)
                 if attempt < settings.agent.model_call_attempts - 1:
