@@ -149,6 +149,26 @@ class OllamaProvider:
         except Exception:
             return False
 
+    def unload(self) -> bool:
+        """Evict model from GPU memory to allow sequential model switching."""
+        success = False
+        try:
+            # 1. Standard Ollama API to evict model: generate with keep_alive=0
+            self._client.generate(model=self.model, keep_alive=0)
+            success = True
+        except Exception:
+            pass
+
+        # 2. Stop command to ensure 100% VRAM release
+        try:
+            import subprocess
+            res = subprocess.run(["ollama", "stop", self.model], capture_output=True, text=True, timeout=10)
+            if res.returncode == 0:
+                success = True
+        except Exception:
+            pass
+        return success
+
 
 class ProviderFactory:
     """Factory for creating model providers."""

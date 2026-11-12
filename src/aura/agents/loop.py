@@ -194,26 +194,148 @@ def _parse_text_tool_calls(content: str, active_tool_names: set[str]) -> list[tu
             if name in active_tool_names and isinstance(args, dict):
                 calls.append((str(name), args))
         except Exception:
-            pass
+            import ast
+            try:
+                data = ast.literal_eval(block.strip())
+                if isinstance(data, dict):
+                    name = data.get("name") or data.get("tool")
+                    args = data.get("arguments") or data.get("parameters") or {}
+                    if name in active_tool_names and isinstance(args, dict):
+                        calls.append((str(name), args))
+            except Exception:
+                pass
 
     if calls:
         return calls
 
-    # 3. Direct JSON object with "name" and "arguments"
+    # 3. Direct JSON object with "name" and "arguments" (or single quotes)
     stripped = content.strip()
-    if (stripped.startswith("{") and stripped.endswith("}")) or ('"name":' in stripped and '"arguments":' in stripped):
-        try:
-            start_idx = stripped.find("{")
-            end_idx = stripped.rfind("}")
-            if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
-                candidate = stripped[start_idx:end_idx + 1]
+    if (stripped.startswith("{") and stripped.endswith("}")) or ('"name":' in stripped or "'name':" in stripped):
+        start_idx = stripped.find("{")
+        end_idx = stripped.rfind("}")
+        if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+            candidate = stripped[start_idx:end_idx + 1]
+            try:
                 data = json.loads(candidate)
                 name = data.get("name") or data.get("tool")
                 args = data.get("arguments") or data.get("parameters") or {}
                 if name in active_tool_names and isinstance(args, dict):
                     calls.append((str(name), args))
-        except Exception:
-            pass
+            except Exception:
+                import ast
+                try:
+                    data = ast.literal_eval(candidate)
+                    if isinstance(data, dict):
+                        name = data.get("name") or data.get("tool")
+                        args = data.get("arguments") or data.get("parameters") or {}
+                        if name in active_tool_names and isinstance(args, dict):
+                            calls.append((str(name), args))
+                except Exception:
+                    pass
+
+    if calls:
+        return calls
+
+    # 4. Action / Tool block pattern (e.g. Action: read_file \n Action Input: {"path": "server.js"})
+    action_match = re.search(r"(?:Action|Tool):\s*([a-zA-Z0-9_-]+)\s*\n+(?:Action Input|Arguments|Input):\s*(.*)", content, re.IGNORECASE | re.DOTALL)
+    if action_match:
+        name = action_match.group(1).strip()
+        arg_str = action_match.group(2).strip()
+        if name in active_tool_names:
+            try:
+                if arg_str.startswith("{"):
+                    end_b = arg_str.find("}")
+                    if end_b != -1:
+                        arg_str = arg_str[:end_b+1]
+                args = json.loads(arg_str)
+                if isinstance(args, dict):
+                    calls.append((name, args))
+            except Exception:
+                clean_arg = arg_str.strip().strip("'\"`")
+                if "\n" in clean_arg:
+                    clean_arg = clean_arg.splitlines()[0].strip().strip("'\"`")
+                if name in {"read_file", "file_outline", "list_directory"}:
+                    calls.append((name, {"path": clean_arg}))
+    if calls:
+        return calls
+
+    # 5. Function call syntax: tool_name(path="server.js") or tool_name("server.js")
+    for name in active_tool_names:
+        fn_pattern = rf"\b{re.escape(name)}\s*\(\s*(.*?)\s*\)"
+        for match in re.finditer(fn_pattern, content):
+            raw_args = match.group(1).strip()
+            args = {}
+            if not raw_args:
+                if name in {"list_directory", "get_file_diff", "run_tests"}:
+                    calls.append((name, {}))
+                continue
+            kw_matches = re.findall(r'([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*(["\'](?:\\.|[^"\'])*["\']|\d+|True|False)', raw_args)
+            if kw_matches:
+                for k, v in kw_matches:
+                    v_clean = v.strip()
+                    if (v_clean.startswith('"') and v_clean.endswith('"')) or (v_clean.startswith("'") and v_clean.endswith("'")):
+                        args[k] = v_clean[1:-1]
+                    elif v_clean.isdigit():
+                        args[k] = int(v_clean)
+                    elif v_clean.lower() == "true":
+                        args[k] = True
+                    elif v_clean.lower() == "false":
+                        args[k] = False
+                    else:
+                        args[k] = v_clean
+                calls.append((name, args))
+            else:
+                val = raw_args.strip().strip('"\'`')
+                if name in {"read_file", "file_outline", "list_directory"}:
+                    calls.append((name, {"path": val}))
+                elif name == "search_code":
+                    calls.append((name, {"pattern": val}))
+                elif name == "run_tests":
+                    calls.append((name, {"test_path": val} if val else {}))
+                elif name == "get_file_diff":
+                    calls.append((name, {"path": val} if val else {}))
+        if calls:
+            return calls
+
+    # 6. Colon syntax: tool_name: <arg> (e.g. `read_file: server.js` or `read_file: {"path": "server.js"}`)
+    for line in content.splitlines():
+        line = line.strip().strip("`")
+        for name in active_tool_names:
+            prefix = f"{name}:"
+            if line.startswith(prefix):
+                rest = line[len(prefix):].strip()
+                if rest.startswith("{") and rest.endswith("}"):
+                    try:
+                        data = json.loads(rest)
+                        if isinstance(data, dict):
+                            calls.append((name, data))
+                            continue
+                    except Exception:
+                        pass
+                clean_val = rest.strip().strip("\"'`")
+                if clean_val:
+                    if name in {"read_file", "file_outline", "list_directory"}:
+                        calls.append((name, {"path": clean_val}))
+                    elif name == "search_code":
+                        calls.append((name, {"pattern": clean_val}))
+                    elif name == "run_tests":
+                        calls.append((name, {"test_path": clean_val}))
+                    elif name == "get_file_diff":
+                        calls.append((name, {"path": clean_val}))
+        if calls:
+            return calls
+
+    # 7. Code block naming tool, e.g. ```read_file\nserver.js\n```
+    for name in active_tool_names:
+        block_match = re.search(rf"```{re.escape(name)}\s*\n(.*?)\n```", content, re.DOTALL | re.IGNORECASE)
+        if block_match:
+            inner = block_match.group(1).strip()
+            if "path:" in inner.lower():
+                m = re.search(r"path:\s*(.*)", inner, re.IGNORECASE)
+                if m:
+                    calls.append((name, {"path": m.group(1).strip().strip("\"'`")}))
+            elif inner and "\n" not in inner:
+                calls.append((name, {"path": inner.strip().strip("\"'`")}))
 
     return calls
 
@@ -221,11 +343,19 @@ def _parse_text_tool_calls(content: str, active_tool_names: set[str]) -> list[tu
 def _looks_like_tool_call(content: str) -> bool:
     """Check if content looks like a malformed or text-based tool call."""
     lowered = content.strip().lower()
-    return (
-        "<tool_call>" in lowered
-        or ("```json" in lowered and ("\"tool\"" in lowered or "\"name\"" in lowered or "\"arguments\"" in lowered))
-        or (lowered.startswith("{") and ("\"name\"" in lowered or "\"tool\"" in lowered) and "\"arguments\"" in lowered)
-    )
+    tool_keywords = ("read_file", "write_file", "edit_file", "list_directory", "file_outline", "search_code", "run_tests", "get_file_diff")
+    if "<tool_call>" in lowered:
+        return True
+    if "```json" in lowered and ("\"tool\"" in lowered or "\"name\"" in lowered or "\"arguments\"" in lowered):
+        return True
+    if lowered.startswith("{") and ("\"name\"" in lowered or "\"tool\"" in lowered or "'name'" in lowered or "'tool'" in lowered):
+        return True
+    for tk in tool_keywords:
+        if f"{tk}:" in lowered or f"{tk}(" in lowered or f"```{tk}" in lowered:
+            return True
+        if re.search(rf"\b(?:action|tool):\s*{tk}\b", lowered):
+            return True
+    return False
 
 
 def prune_conversation_history(messages: list[dict], settings: Any) -> list[dict]:

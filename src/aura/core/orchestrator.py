@@ -11,6 +11,10 @@ Simple tasks bypass this and use a single run_agent_loop call.
 from __future__ import annotations
 
 import logging
+import os
+import subprocess
+import sys
+from pathlib import Path
 from typing import Any
 
 from .model_registry import ModelRole
@@ -24,6 +28,142 @@ from ..core import McpHub, SessionMemory, ResultCache
 from ..core.file_tracker import InspectionTracker
 
 logger = logging.getLogger(__name__)
+
+
+def _run_subprocess_dry_runs(state: TaskState, workspace_path: str | Path | None) -> list[str]:
+    """Execute syntax and sanity dry runs on newly modified/created files in workspace."""
+    if not workspace_path:
+        return []
+
+    ws = Path(workspace_path).resolve()
+    if not ws.exists() or not ws.is_dir():
+        return []
+
+    defects: list[str] = []
+
+    # 1. Identify target files from state tracking
+    target_files: set[str] = set()
+    for p, status in state.inspected_files.items():
+        if status in {"modified", "created", "written", "identified"}:
+            target_files.add(p)
+
+    # 2. Add files detected via git status if available
+    try:
+        res = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=str(ws),
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if res.returncode == 0:
+            for line in res.stdout.splitlines():
+                if len(line) > 3:
+                    file_p = line[3:].strip()
+                    target_files.add(file_p)
+    except Exception:
+        pass
+
+    for rel_path in sorted(target_files):
+        clean_rel = rel_path.strip().strip("'\"`")
+        # Ignore hidden files, markdown, json, or non-code files
+        if not clean_rel or clean_rel.startswith(".") or clean_rel.endswith((".md", ".json", ".txt", ".csv")):
+            continue
+
+        full_path = ws / clean_rel
+        if not full_path.exists():
+            if state.inspected_files.get(rel_path) in {"modified", "created", "written"}:
+                defects.append(f"Expected file '{clean_rel}' does not exist on disk in workspace.")
+            continue
+
+        if not full_path.is_file():
+            continue
+
+        # Dry run Python files
+        if full_path.suffix == ".py":
+            # A. Syntax compilation check
+            try:
+                py_res = subprocess.run(
+                    [sys.executable, "-m", "py_compile", str(full_path)],
+                    cwd=str(ws),
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                )
+                if py_res.returncode != 0:
+                    err_msg = py_res.stderr.strip() or py_res.stdout.strip()
+                    defects.append(f"Python syntax compilation failed for '{clean_rel}':\n{err_msg}")
+                    continue
+            except Exception as exc:
+                logger.warning("py_compile check failed on %s: %s", clean_rel, exc)
+
+            # B. Subprocess execution check for standalone scripts/tests
+            name_lower = full_path.name.lower()
+            try:
+                file_text = full_path.read_text(encoding="utf-8", errors="ignore")
+            except Exception:
+                file_text = ""
+            is_runnable = (
+                name_lower.startswith(("test", "simulate", "validate", "run", "benchmark"))
+                or "if __name__" in file_text
+            )
+            if is_runnable:
+                try:
+                    run_res = subprocess.run(
+                        [sys.executable, str(full_path)],
+                        cwd=str(ws),
+                        capture_output=True,
+                        text=True,
+                        timeout=15,
+                    )
+                    if run_res.returncode != 0:
+                        err_msg = run_res.stderr.strip() or run_res.stdout.strip()
+                        defects.append(f"Subprocess execution error in '{clean_rel}' (exit code {run_res.returncode}):\n{err_msg}")
+                except subprocess.TimeoutExpired:
+                    defects.append(f"Subprocess execution timed out (>15s) in '{clean_rel}'")
+                except Exception as exc:
+                    defects.append(f"Subprocess execution error in '{clean_rel}': {exc}")
+
+        # Dry run JavaScript files
+        elif full_path.suffix == ".js":
+            # A. Syntax check via node --check
+            try:
+                node_res = subprocess.run(
+                    ["node", "--check", str(full_path)],
+                    cwd=str(ws),
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                )
+                if node_res.returncode != 0:
+                    err_msg = node_res.stderr.strip() or node_res.stdout.strip()
+                    defects.append(f"Node.js syntax check failed for '{clean_rel}':\n{err_msg}")
+                    continue
+            except FileNotFoundError:
+                pass  # node not available
+            except Exception as exc:
+                logger.warning("node syntax check failed on %s: %s", clean_rel, exc)
+
+            # B. Subprocess execution check for test runners
+            name_lower = full_path.name.lower()
+            if name_lower.startswith(("test", "run_test", "validate", "simulate")):
+                try:
+                    node_run = subprocess.run(
+                        ["node", str(full_path)],
+                        cwd=str(ws),
+                        capture_output=True,
+                        text=True,
+                        timeout=15,
+                    )
+                    if node_run.returncode != 0:
+                        err_msg = node_run.stderr.strip() or node_run.stdout.strip()
+                        defects.append(f"Node.js execution failed for '{clean_rel}' (exit code {node_run.returncode}):\n{err_msg}")
+                except subprocess.TimeoutExpired:
+                    defects.append(f"Node.js execution timed out (>15s) in '{clean_rel}'")
+                except Exception as exc:
+                    defects.append(f"Node.js execution error in '{clean_rel}': {exc}")
+
+    return defects
 
 async def run_agent_loop(*args: Any, **kwargs: Any) -> str:
     """Wrapper around loop.run_agent_loop to break circular import and permit mocking."""
@@ -110,121 +250,165 @@ async def run_multi_stage(
 
     results: list[str] = []
 
-    # ── Stage 1: Analysis ───────────────────────────────────────────────
-    analysis_model = router.select(ModelRole.ANALYSIS)
-    analysis_provider = ProviderFactory.create_ollama(
-        model=analysis_model, num_ctx=ctx_override,
-    )
-    state.used_providers.append(analysis_provider)
-    logger.info("Multi-stage: ANALYSIS with %s", analysis_model)
-    print(f"  [Stage 1: ANALYSIS with {analysis_model}]")
-
-    analysis_task = task + ANALYSIS_INSTRUCTIONS
-    analysis_result = await run_agent_loop(
-        analysis_task, analysis_provider, hub, memory, cache,
-        task_state=state, inspection_tracker=tracker,
-    )
-
-    # Parse structured findings from analysis output
-    _extract_findings(analysis_result, state)
-    state.completed_work.append(f"Analysis completed with {analysis_model}")
-    state.stage = TaskStage.CODING
-    results.append(f"## Analysis ({analysis_model})\n{analysis_result}")
-
-    # ── Stage 2: Coding (skip if read-only) ─────────────────────────────
-    if state.read_only:
-        logger.info("Multi-stage: skipping CODING (read-only workspace).")
-        print("  [Stage 2: CODING skipped (read-only workspace)]")
-        state.stage = TaskStage.VERIFICATION
-        state.completed_work.append("Coding skipped (read-only)")
-    else:
-        coding_model = router.select(ModelRole.CODING)
-        coding_provider = ProviderFactory.create_ollama(
-            model=coding_model, num_ctx=ctx_override,
+    try:
+        # ── Stage 1: Analysis ───────────────────────────────────────────────
+        analysis_model = router.select(ModelRole.ANALYSIS)
+        analysis_provider = ProviderFactory.create_ollama(
+            model=analysis_model, num_ctx=ctx_override,
         )
-        state.used_providers.append(coding_provider)
-        logger.info("Multi-stage: CODING with %s", coding_model)
-        print(f"  [Stage 2: CODING with {coding_model}]")
+        state.used_providers.append(analysis_provider)
+        logger.info("Multi-stage: ANALYSIS with %s", analysis_model)
+        print(f"  [Stage 1: ANALYSIS with {analysis_model}]")
 
-        handoff = state.build_handoff()
-        coding_task = task + CODING_INSTRUCTIONS_TEMPLATE.format(handoff=handoff)
-        coding_result = await run_agent_loop(
-            coding_task, coding_provider, hub, memory, cache,
+        analysis_task = task + ANALYSIS_INSTRUCTIONS
+        analysis_result = await run_agent_loop(
+            analysis_task, analysis_provider, hub, memory, cache,
             task_state=state, inspection_tracker=tracker,
         )
 
-        _extract_implementation(coding_result, state)
-        state.completed_work.append(f"Coding completed with {coding_model}")
-        state.stage = TaskStage.VERIFICATION
-        results.append(f"## Implementation ({coding_model})\n{coding_result}")
+        # Parse structured findings from analysis output
+        _extract_findings(analysis_result, state)
+        state.completed_work.append(f"Analysis completed with {analysis_model}")
+        state.stage = TaskStage.CODING
+        results.append(f"## Analysis ({analysis_model})\n{analysis_result}")
 
-    # ── Stage 3: Verification ───────────────────────────────────────────
-    verify_model = router.select(ModelRole.VERIFICATION)
-    verify_provider = ProviderFactory.create_ollama(
-        model=verify_model, num_ctx=ctx_override,
-    )
-    state.used_providers.append(verify_provider)
-    logger.info("Multi-stage: VERIFICATION with %s", verify_model)
-    print(f"  [Stage 3: VERIFICATION with {verify_model}]")
+        # Evict analysis model from GPU memory before loading coding model
+        if hasattr(analysis_provider, "unload"):
+            analysis_provider.unload()
 
-    handoff = state.build_handoff()
-    verify_task = task + VERIFICATION_INSTRUCTIONS_TEMPLATE.format(handoff=handoff)
-    verify_result = await run_agent_loop(
-        verify_task, verify_provider, hub, memory, cache,
-        task_state=state, inspection_tracker=tracker,
-    )
-
-    state.completed_work.append(f"Verification completed with {verify_model}")
-    results.append(f"## Verification ({verify_model})\n{verify_result}")
-
-    # ── Bounded correction cycle ────────────────────────────────────────
-    if not state.read_only and _verdict_is_fail(verify_result):
-        for cycle in range(MAX_CORRECTION_CYCLES):
-            logger.info("Multi-stage: correction cycle %d", cycle + 1)
-            defects = _extract_defects(verify_result)
-            if not defects:
-                break
-
-            state.stage = TaskStage.CODING
-            state.errors.extend(defects[:5])
-            correction_handoff = state.build_handoff()
-            correction_task = (
-                f"Fix the following defects found during verification:\n"
-                + "\n".join(f"- {d}" for d in defects)
-                + CODING_INSTRUCTIONS_TEMPLATE.format(handoff=correction_handoff)
-            )
-            coding_result = await run_agent_loop(
-                correction_task, coding_provider, hub, memory, cache,
-                task_state=state, inspection_tracker=tracker,
-            )
-            _extract_implementation(coding_result, state)
-            state.completed_work.append(f"Correction cycle {cycle + 1}")
-
-            # Re-verify
+        # ── Stage 2: Coding (skip if read-only) ─────────────────────────────
+        coding_provider = None
+        coding_model = None
+        if state.read_only:
+            logger.info("Multi-stage: skipping CODING (read-only workspace).")
+            print("  [Stage 2: CODING skipped (read-only workspace)]")
             state.stage = TaskStage.VERIFICATION
-            correction_verify_handoff = state.build_handoff()
-            re_verify_task = task + VERIFICATION_INSTRUCTIONS_TEMPLATE.format(
-                handoff=correction_verify_handoff
+            state.completed_work.append("Coding skipped (read-only)")
+        else:
+            coding_model = router.select(ModelRole.CODING)
+            coding_provider = ProviderFactory.create_ollama(
+                model=coding_model, num_ctx=ctx_override,
             )
-            verify_result = await run_agent_loop(
-                re_verify_task, verify_provider, hub, memory, cache,
+            state.used_providers.append(coding_provider)
+            logger.info("Multi-stage: CODING with %s", coding_model)
+            print(f"  [Stage 2: CODING with {coding_model}]")
+
+            handoff = state.build_handoff()
+            coding_task = task + CODING_INSTRUCTIONS_TEMPLATE.format(handoff=handoff)
+            coding_result = await run_agent_loop(
+                coding_task, coding_provider, hub, memory, cache,
                 task_state=state, inspection_tracker=tracker,
             )
-            results.append(f"## Correction {cycle + 1} + Re-verification\n{verify_result}")
 
-            if not _verdict_is_fail(verify_result):
-                break
+            _extract_implementation(coding_result, state)
+            state.completed_work.append(f"Coding completed with {coding_model}")
+            state.stage = TaskStage.VERIFICATION
+            results.append(f"## Implementation ({coding_model})\n{coding_result}")
 
-    if _verdict_is_fail(verify_result):
-        defects = _extract_defects(verify_result)
-        for d in defects:
-            state.add_defect(d)
-        if not defects:
-            state.add_defect("Verification returned FAIL")
+            # Evict coding model from GPU memory before loading verification model
+            if hasattr(coding_provider, "unload"):
+                coding_provider.unload()
 
-    state.stage = TaskStage.COMPLETE
+        # ── Stage 3: Verification ───────────────────────────────────────────
+        # Subprocess dry runs on modified/created workspace files
+        dry_run_defects = _run_subprocess_dry_runs(state, getattr(hub, "workspace", None))
+        for df in dry_run_defects:
+            state.add_defect(df)
 
-    return _build_final_multi_stage_report(task, state, tracker, results)
+        verify_model = router.select(ModelRole.VERIFICATION)
+        verify_provider = ProviderFactory.create_ollama(
+            model=verify_model, num_ctx=ctx_override,
+        )
+        state.used_providers.append(verify_provider)
+        logger.info("Multi-stage: VERIFICATION with %s", verify_model)
+        print(f"  [Stage 3: VERIFICATION with {verify_model}]")
+
+        handoff = state.build_handoff()
+        if dry_run_defects:
+            handoff += "\n\n### Automated Subprocess Dry-Run Defects\n" + "\n".join(f"- {d}" for d in dry_run_defects)
+
+        verify_task = task + VERIFICATION_INSTRUCTIONS_TEMPLATE.format(handoff=handoff)
+        verify_result = await run_agent_loop(
+            verify_task, verify_provider, hub, memory, cache,
+            task_state=state, inspection_tracker=tracker,
+        )
+
+        state.completed_work.append(f"Verification completed with {verify_model}")
+        results.append(f"## Verification ({verify_model})\n{verify_result}")
+
+        # ── Bounded correction cycle ────────────────────────────────────────
+        needs_correction = not state.read_only and (_verdict_is_fail(verify_result) or bool(state.defects))
+        if needs_correction and coding_provider is not None:
+            for cycle in range(MAX_CORRECTION_CYCLES):
+                logger.info("Multi-stage: correction cycle %d", cycle + 1)
+                defects = _extract_defects(verify_result)
+                for df in state.defects:
+                    if df not in defects:
+                        defects.append(df)
+                if not defects:
+                    break
+
+                # Evict verification model before loading coding model
+                if hasattr(verify_provider, "unload"):
+                    verify_provider.unload()
+
+                state.stage = TaskStage.CODING
+                state.errors.extend(defects[:5])
+                correction_handoff = state.build_handoff()
+                correction_task = (
+                    f"Fix the following defects found during verification:\n"
+                    + "\n".join(f"- {d}" for d in defects)
+                    + CODING_INSTRUCTIONS_TEMPLATE.format(handoff=correction_handoff)
+                )
+                coding_result = await run_agent_loop(
+                    correction_task, coding_provider, hub, memory, cache,
+                    task_state=state, inspection_tracker=tracker,
+                )
+                _extract_implementation(coding_result, state)
+                state.completed_work.append(f"Correction cycle {cycle + 1}")
+
+                # Evict coding model before re-verifying
+                if hasattr(coding_provider, "unload"):
+                    coding_provider.unload()
+
+                # Re-run dry runs
+                state.defects.clear()
+                new_dry_defects = _run_subprocess_dry_runs(state, getattr(hub, "workspace", None))
+                for df in new_dry_defects:
+                    state.add_defect(df)
+
+                # Re-verify
+                state.stage = TaskStage.VERIFICATION
+                correction_verify_handoff = state.build_handoff()
+                if new_dry_defects:
+                    correction_verify_handoff += "\n\n### Automated Subprocess Dry-Run Defects\n" + "\n".join(f"- {d}" for d in new_dry_defects)
+                re_verify_task = task + VERIFICATION_INSTRUCTIONS_TEMPLATE.format(
+                    handoff=correction_verify_handoff
+                )
+                verify_result = await run_agent_loop(
+                    re_verify_task, verify_provider, hub, memory, cache,
+                    task_state=state, inspection_tracker=tracker,
+                )
+                results.append(f"## Correction {cycle + 1} + Re-verification\n{verify_result}")
+
+                if not _verdict_is_fail(verify_result) and not state.defects:
+                    break
+
+        if _verdict_is_fail(verify_result) or state.defects:
+            defects = _extract_defects(verify_result)
+            for d in defects:
+                state.add_defect(d)
+            if not state.defects:
+                state.add_defect("Verification returned FAIL")
+
+        state.stage = TaskStage.COMPLETE
+
+        return _build_final_multi_stage_report(task, state, tracker, results)
+    finally:
+        # Guarantee all loaded models are unloaded from VRAM
+        for p in state.used_providers:
+            if hasattr(p, "unload"):
+                p.unload()
 
 
 def _build_final_multi_stage_report(
