@@ -66,7 +66,17 @@ class OllamaProvider:
     ):
         self.model = model or os.environ.get("AGENT_MODEL", "qwen3.5:4b")
         self.default_options = default_options or ModelOptions()
-        self.timeout = timeout if timeout is not None else float(os.environ.get("AGENT_MODEL_TIMEOUT", "60.0"))
+        if timeout is not None:
+            self.timeout = timeout
+        elif "AGENT_MODEL_TIMEOUT" in os.environ:
+            self.timeout = float(os.environ["AGENT_MODEL_TIMEOUT"])
+        else:
+            # Adaptive timeout based on model size to prevent false timeouts on laptops
+            m_lower = self.model.lower()
+            if any(k in m_lower for k in ("9b", "8b", "7b", "14b", "coder")):
+                self.timeout = 180.0
+            else:
+                self.timeout = 120.0
         self._client = ollama.Client(timeout=self.timeout)
         self.last_prompt_eval_count: int | None = None
         self.last_eval_count: int | None = None
@@ -117,7 +127,20 @@ class OllamaProvider:
                 self.total_eval_count += resp.eval_count
             return resp
         except (httpx.TimeoutException, TimeoutError) as e:
-            raise TimeoutError(f"Model call timed out after {self.timeout}s: {e}") from e
+            # Graceful retry with extended timeout to absorb model reload latency
+            try:
+                extended_client = ollama.Client(timeout=self.timeout + 60.0)
+                response = await asyncio.to_thread(extended_client.chat, **kwargs)
+                resp = self._validate_response(response)
+                if hasattr(resp, "prompt_eval_count") and resp.prompt_eval_count is not None:
+                    self.last_prompt_eval_count = resp.prompt_eval_count
+                    self.total_prompt_eval_count += resp.prompt_eval_count
+                if hasattr(resp, "eval_count") and resp.eval_count is not None:
+                    self.last_eval_count = resp.eval_count
+                    self.total_eval_count += resp.eval_count
+                return resp
+            except Exception:
+                raise TimeoutError(f"Model call timed out after {self.timeout}s: {e}") from e
         except (ConnectionError, httpx.ConnectError, httpx.NetworkError) as e:
             raise ConnectionError(f"Cannot connect to Ollama: {e}") from e
         except Exception as e:

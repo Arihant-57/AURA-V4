@@ -28,6 +28,7 @@ def parse_args():
     parser.add_argument("--mode", choices=["ro", "rw"], default=None, help="Access mode: ro (read-only) or rw (read-write)")
     parser.add_argument("--yes", "-y", action="store_true", help="Auto-confirm authorization prompts")
     parser.add_argument("--model", "-m", type=str, help="Model name override")
+    parser.add_argument("--low-vram", action="store_true", help="Lock all pipeline stages to qwen2.5-coder:7b to eliminate model swapping and minimize VRAM thrashing")
     parser.add_argument("--ctx", "-c", type=int, help="Context window size override (num_ctx)")
     parser.add_argument("--task", "-t", type=str, help="Single task to execute non-interactively")
     parser.add_argument("query", nargs="*", help="Positional task query")
@@ -215,8 +216,10 @@ async def main():
     registry.refresh()
     router = ModelRouter(registry=registry)
 
-    # CLI --model override locks all roles to that model
+    # CLI --model or --low-vram override locks all roles to that model
     cli_model = args.model
+    if args.low_vram:
+        cli_model = "qwen2.5-coder:7b"
     if cli_model:
         router.set_override(cli_model)
 
