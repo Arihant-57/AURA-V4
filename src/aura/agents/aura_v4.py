@@ -172,8 +172,12 @@ async def _run_task(
         return answer, state.used_providers
     else:
         task_provider = _select_provider_for_task(task, router, default_provider, ctx_override)
-        answer = await run_agent_loop(task, task_provider, hub, memory, cache)
-        return answer, [task_provider]
+        try:
+            answer = await run_agent_loop(task, task_provider, hub, memory, cache)
+            return answer, [task_provider]
+        finally:
+            if hasattr(task_provider, "unload"):
+                task_provider.unload()
 
 
 async def main():
