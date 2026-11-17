@@ -135,5 +135,59 @@ class TestSequentialModelUnload:
 
         success = provider.unload()
         assert success is True
-        # Verify ollama stop was invoked
-        mock_run.assert_called_with(["ollama", "stop", "qwen3.5:4b"], capture_output=True, text=True, timeout=10)
+        # Verify ollama stop was invoked (hidden console on Windows)
+        import sys
+        assert mock_run.called
+        args, kwargs = mock_run.call_args
+        assert args == (["ollama", "stop", "qwen3.5:4b"],)
+        assert kwargs["capture_output"] is True
+        assert kwargs["text"] is True
+        assert kwargs["timeout"] == 10
+        if sys.platform == "win32":
+            assert int(kwargs["creationflags"]) & 0x08000000
+            assert kwargs["startupinfo"].wShowWindow == 0
+
+
+class TestRoutingAndToolResilience:
+    """Verify standalone snippet routing and MCP timeout recovery."""
+
+    def test_standalone_snippet_not_multi_stage(self):
+        from src.aura.core.model_router import needs_multi_stage
+        from src.aura.core.scope import TaskScope
+
+        snippet = "Write a 3-line Python function to add two numbers and output only a code block."
+        assert needs_multi_stage(snippet, TaskScope(snippet)) is False
+
+        project_fix = "Fix the validation bug in server.js and add unit tests for it"
+        assert needs_multi_stage(project_fix, TaskScope(project_fix)) is True
+
+    @pytest.mark.asyncio
+    async def test_tool_timeout_marks_server_broken_and_skips_memory(self):
+        import asyncio
+        from unittest.mock import AsyncMock
+        from src.aura.agents.loop import execute_tool_call
+        from src.aura.core import ResultCache, SessionMemory, TaskScope
+
+        hub = MagicMock()
+        hub.tool_schemas = {"read_file": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}}
+        hub.tool_server = {"read_file": "filesystem"}
+        client = MagicMock()
+        client.call_tool = AsyncMock(side_effect=asyncio.TimeoutError())
+        hub.tool_clients = {"read_file": client}
+
+        memory = SessionMemory()
+        cache = ResultCache()
+        out, meta = await execute_tool_call(
+            "read_file",
+            {"path": "missing.py"},
+            step=1,
+            active_tool_names={"read_file"},
+            hub=hub,
+            cache=cache,
+            memory=memory,
+            scope=TaskScope("read missing.py"),
+        )
+        assert meta["error"] is True
+        assert "timed out" in out
+        hub.mark_broken.assert_called_once_with("filesystem")
+        assert "missing.py" not in memory.files

@@ -12,10 +12,82 @@ from __future__ import annotations
 
 import asyncio
 import os
+import subprocess
 import sys
 from contextlib import AsyncExitStack
 from pathlib import Path
 from typing import Any, Optional
+
+_WIN32_NO_WINDOW_PATCHED = False
+
+
+def win32_subprocess_kwargs(detached: bool = False, hide_window: bool = True) -> dict[str, Any]:
+    """Return Windows subprocess kwargs that suppress popup console windows cleanly."""
+    if sys.platform != "win32":
+        return {}
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+    if detached:
+        # CREATE_NEW_PROCESS_GROUP works cleanly with CREATE_NO_WINDOW without console allocation
+        flags |= getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
+    kwargs: dict[str, Any] = {"creationflags": flags}
+    if hide_window and hasattr(subprocess, "STARTUPINFO"):
+        si = subprocess.STARTUPINFO()
+        si.dwFlags |= getattr(subprocess, "STARTF_USESHOWWINDOW", 1)
+        si.wShowWindow = getattr(subprocess, "SW_HIDE", 0)
+        kwargs["startupinfo"] = si
+    return kwargs
+
+
+def _suppress_win32_consoles() -> None:
+    """Ensure Windows MCP stdio subprocesses never flash popup console windows."""
+    global _WIN32_NO_WINDOW_PATCHED
+    if sys.platform != "win32" or _WIN32_NO_WINDOW_PATCHED:
+        return
+    try:
+        import anyio
+
+        orig_open = anyio.open_process
+        win_kw = win32_subprocess_kwargs(hide_window=True)
+        create_no_window = int(win_kw.get("creationflags", 0x08000000))
+
+        async def _silent_open_process(*args: Any, **kwargs: Any) -> Any:
+            kwargs["creationflags"] = int(kwargs.get("creationflags", 0) or 0) | create_no_window
+            if kwargs.get("startupinfo") is None and "startupinfo" in win_kw:
+                kwargs["startupinfo"] = win_kw["startupinfo"]
+            return await orig_open(*args, **kwargs)
+
+        anyio.open_process = _silent_open_process
+
+        try:
+            import mcp.os.win32.utilities as _mcp_win32
+
+            orig_fallback = getattr(_mcp_win32, "_create_windows_fallback_process", None)
+            if callable(orig_fallback):
+                orig_popen = subprocess.Popen
+
+                async def _silent_fallback(*args: Any, **kwargs: Any) -> Any:
+                    def _wrapped_popen(*p_args: Any, **p_kwargs: Any) -> Any:
+                        p_kwargs["creationflags"] = int(p_kwargs.get("creationflags", 0) or 0) | create_no_window
+                        if p_kwargs.get("startupinfo") is None and "startupinfo" in win_kw:
+                            p_kwargs["startupinfo"] = win_kw["startupinfo"]
+                        return orig_popen(*p_args, **p_kwargs)
+
+                    _mcp_win32.subprocess.Popen = _wrapped_popen  # type: ignore[attr-defined]
+                    try:
+                        return await orig_fallback(*args, **kwargs)
+                    finally:
+                        _mcp_win32.subprocess.Popen = orig_popen  # type: ignore[attr-defined]
+
+                _mcp_win32._create_windows_fallback_process = _silent_fallback  # type: ignore[attr-defined]
+        except Exception:
+            pass
+
+        _WIN32_NO_WINDOW_PATCHED = True
+    except Exception:
+        pass
+
+
+_suppress_win32_consoles()
 
 from mcp import Client, StdioServerParameters
 
@@ -29,7 +101,15 @@ class McpHub:
     workspace: Path = Path(".")
     read_only: bool = False
 
-    def __init__(self, workspace: Path, read_only: bool = False) -> None:
+    def __init__(
+        self,
+        workspace: Path,
+        read_only: bool = False,
+        enable_desktop: bool | None = None,
+        enable_jarvis: bool | None = None,
+        enable_browser: bool | None = None,
+    ) -> None:
+        _suppress_win32_consoles()
         self.workspace = workspace
         self.read_only = read_only
         self._stack: Optional[AsyncExitStack] = None
@@ -39,7 +119,17 @@ class McpHub:
         self.tool_schemas: dict[str, Any] = {}
         self.tool_server: dict[str, str] = {}
         self.broken: set[str] = set()
-        self.server_names: tuple[str, ...] = ("filesystem", "git")
+        use_desktop = (os.environ.get("AURA_ENABLE_DESKTOP_MCP", "0") == "1") if enable_desktop is None else enable_desktop
+        use_jarvis = (os.environ.get("AURA_ENABLE_JARVIS_MCP", "0") == "1") if enable_jarvis is None else enable_jarvis
+        use_browser = (os.environ.get("AURA_ENABLE_BROWSER_MCP", "0") == "1") if enable_browser is None else enable_browser
+        names: list[str] = ["filesystem", "git"]
+        if use_desktop:
+            names.append("desktop")
+        if use_jarvis:
+            names.append("jarvis")
+        if use_browser:
+            names.append("browser")
+        self.server_names: tuple[str, ...] = tuple(names)
 
     def _server_parameters(self, server_name: str) -> StdioServerParameters:
         """
@@ -71,10 +161,11 @@ class McpHub:
     async def _connect(self, server_name: str) -> bool:
         assert self._stack is not None
         try:
-            client = await self._stack.enter_async_context(
-                Client(self._server_parameters(server_name))
+            client = await asyncio.wait_for(
+                self._stack.enter_async_context(Client(self._server_parameters(server_name))),
+                timeout=15.0,
             )
-            tools = await self._discover_all_tools(client)
+            tools = await asyncio.wait_for(self._discover_all_tools(client), timeout=15.0)
         except Exception as exc:
             print(f"MCP SERVER FAILED: {server_name}: {exc}")
             self.broken.add(server_name)
@@ -134,8 +225,16 @@ class McpHub:
         Closes existing server processes cleanly, points workspace to the new
         directory, sets read_only mode, and restarts all servers.
         """
+        resolved = new_workspace.resolve()
+        if (
+            self._stack is not None
+            and not self.broken
+            and resolved == self.workspace
+            and self.read_only == read_only
+        ):
+            return len(self.clients) > 0
         await self.close()
-        self.workspace = new_workspace.resolve()
+        self.workspace = resolved
         self.read_only = read_only
         await self.start()
         return len(self.clients) > 0

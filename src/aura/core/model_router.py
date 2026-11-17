@@ -15,7 +15,7 @@ from enum import Enum
 from typing import Any, Optional
 
 from .model_registry import ModelRegistry, ModelRole
-from .scope import TaskScope
+from .scope import SPECIALIST_AGENTS, TaskScope, normalize_agent_role
 from .error_classifier import ErrorCategory, classify_error_message
 
 logger = logging.getLogger(__name__)
@@ -40,6 +40,7 @@ class TaskState:
     workspace: str = ""
     read_only: bool = True
     stage: TaskStage = TaskStage.ANALYSIS
+    active_agent: str = "auto"
     inspected_files: dict[str, str] = field(default_factory=dict)  # path → status
     findings: list[str] = field(default_factory=list)
     proposed_changes: list[str] = field(default_factory=list)
@@ -153,6 +154,18 @@ def classify_task_role(task: str, scope: TaskScope) -> ModelRole:
 
     Simple heuristic; no model call needed.
     """
+    agent_role = normalize_agent_role(getattr(scope, "agent_role", "auto"))
+    if agent_role != "auto":
+        role_map = {
+            "analysis": ModelRole.ANALYSIS,
+            "coding": ModelRole.CODING,
+            "verification": ModelRole.VERIFICATION,
+            "lightweight": ModelRole.LIGHTWEIGHT,
+        }
+        mapped_role = SPECIALIST_AGENTS.get(agent_role, {}).get("model_role", "auto")
+        if mapped_role in role_map:
+            return role_map[mapped_role]
+
     lower = task.lower()
 
     if scope.conversational:
@@ -196,8 +209,44 @@ def needs_multi_stage(task: str, scope: TaskScope) -> bool:
     # Simple or brief tasks (< 8 words) should never be forced into multi-stage execution
     if word_count < 8:
         return False
-    # Multi-stage requires change intent combined with complexity (longer prompt or diagnosis)
-    return has_change and (word_count > 12 or scope.diagnosis)
+    # Standalone snippet/math prompts (e.g. "add two numbers") without workspace/file signals stay single-pass
+    workspace_signals = {"file", "files", "project", "repo", "codebase", "module", "endpoint", "api", "server", "test", "tests", "bug", "error", "class", "component", "route", "backend", "frontend"}
+    has_file_ref = bool(re.search(r"[\w./\\-]+\.(?:py|js|ts|tsx|jsx|cpp|hpp|h|c|json|md|html|css)\b", task.lower()))
+    repo_coding_signals = {
+        "repo", "repository", "codebase", "module", "modules", "endpoint",
+        "api", "server", "backend", "frontend", "class", "component", "route",
+        "handler", "bug", "test", "tests", "git", "pytest", "refactor",
+    }
+    if (
+        (scope.desktop or scope.jarvis)
+        and not (scope.backend or scope.frontend or scope.git or has_file_ref)
+        and not (words & repo_coding_signals)
+    ):
+        return False
+    has_workspace_context = scope.diagnosis or has_file_ref or bool(words & workspace_signals)
+    # Multi-stage requires change intent combined with workspace complexity
+    return has_change and has_workspace_context and (word_count > 12 or scope.diagnosis)
+
+
+def is_heavy_task(task: str, scope: TaskScope) -> bool:
+    """True when a task exceeds lightweight single-model edits and benefits from cloud routing."""
+    if scope.conversational:
+        return False
+    lower = task.lower()
+    words = _extract_words(task)
+    word_count = len(re.findall(r"\b\w+\b", task))
+    file_refs = re.findall(r"[\w./\\-]+\.(?:py|js|ts|tsx|jsx|cpp|hpp|h|c|json|md|html|css)\b", lower)
+    heavy_keywords = {"refactor", "migrate", "architecture", "entire", "security", "end-to-end", "all"}
+
+    if needs_multi_stage(task, scope) and (
+        len(set(file_refs)) >= 2
+        or word_count >= 20
+        or bool(words & heavy_keywords)
+        or "end-to-end" in lower
+        or "multi-file" in lower
+    ):
+        return True
+    return len(set(file_refs)) >= 3 and word_count >= 15
 
 
 @dataclass

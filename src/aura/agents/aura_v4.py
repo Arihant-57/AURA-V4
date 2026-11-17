@@ -6,18 +6,21 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import inspect
 import os
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
-from ..config import get_settings, resolve_workspace
+from ..config import get_settings, resolve_workspace, load_aura_env
 from ..config.workspace import normalize_workspace_path, find_referenced_directory
 from ..core import McpHub, SessionMemory, ResultCache
 from ..core.providers import ProviderFactory
 from ..core.model_registry import ModelRegistry, ModelRole
-from ..core.model_router import ModelRouter, classify_task_role, needs_multi_stage, TaskState, TaskStage
-from ..core.scope import TaskScope
+from ..core.model_router import (
+    ModelRouter, classify_task_role, needs_multi_stage, is_heavy_task, TaskState, TaskStage,
+)
+from ..core.scope import TaskScope, normalize_agent_role, parse_agent_prefix
 from ..core.orchestrator import run_multi_stage
 from .loop import run_agent_loop
 
@@ -34,6 +37,9 @@ def parse_args():
     parser.add_argument("query", nargs="*", help="Positional task query")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
     parser.add_argument("--selftest", action="store_true", help="Run sanity check")
+    parser.add_argument("--web", action="store_true", help="Launch local web UI on 127.0.0.1")
+    parser.add_argument("--overlay", action="store_true", help="Also launch Windows Dynamic Island floating pill with --web")
+    parser.add_argument("--port", type=int, default=8000, help="Port for --web server (default: 8000)")
     return parser.parse_args()
 
 
@@ -133,17 +139,18 @@ def _select_provider_for_task(
     router: ModelRouter,
     default_provider: object,
     ctx_override: int | None,
+    scope: TaskScope | None = None,
 ) -> object:
     """Pick the right OllamaProvider for this task's classified role."""
-    scope = TaskScope(task)
-    role = classify_task_role(task, scope)
+    task_scope = scope if scope is not None else TaskScope(task)
+    role = classify_task_role(task, task_scope)
     model_name = router.select(role)
 
     # Reuse existing provider if model matches (avoids re-creating)
     if model_name == getattr(default_provider, "model", None):
         return default_provider
 
-    return ProviderFactory.create_ollama(model=model_name, num_ctx=ctx_override)
+    return ProviderFactory.create_for_model(model=model_name, num_ctx=ctx_override)
 
 
 async def _run_task(
@@ -154,13 +161,78 @@ async def _run_task(
     memory: SessionMemory,
     cache: ResultCache,
     ctx_override: int | None,
+    unload_on_complete: bool = False,
+    on_event: Callable[[dict[str, Any]], Any] | None = None,
+    agent_role: str | None = None,
+    steer_queue: Any = None,
+    get_pending_steer: Callable[[], Any] | None = None,
 ) -> tuple[str, list[object]]:
-    """Run a task using single-pass or multi-stage depending on complexity."""
-    scope = TaskScope(task)
-    if needs_multi_stage(task, scope):
+    """Run a task using single-pass, specialist sub-agent, multi-stage orchestrator, or heavy cloud routing."""
+    routing_task = task.split("[Current Request]\n", 1)[-1] if "[Current Request]\n" in task else task
+    prefixed_agent, _ = parse_agent_prefix(routing_task)
+    effective_agent = normalize_agent_role(agent_role) if agent_role else (prefixed_agent or "auto")
+    scope = TaskScope(routing_task, agent_role=effective_agent)
+
+    use_cloud_heavy = (
+        getattr(router, "_override", None) is None
+        and os.environ.get("AURA_CLOUD_FOR_HEAVY") == "1"
+        and is_heavy_task(routing_task, scope)
+        and bool(ProviderFactory.available_cloud_models())
+    )
+    if use_cloud_heavy:
+        cloud_provider = ProviderFactory.create_cloud("cloud:auto", num_ctx=ctx_override)
+        if cloud_provider.is_model_available():
+            if on_event is not None:
+                try:
+                    res = on_event({
+                        "event": "stage",
+                        "stage": "cloud",
+                        "agent": effective_agent,
+                        "model": cloud_provider.model,
+                        "message": f"Heavy task ({effective_agent}): using {cloud_provider.model} (local fallback armed)...",
+                    })
+                    if inspect.isawaitable(res):
+                        await res
+                except Exception:
+                    pass
+            try:
+                cloud_state = (
+                    TaskState(
+                        original_request=routing_task,
+                        workspace=str(getattr(hub, "workspace", "")),
+                        read_only=getattr(hub, "read_only", True),
+                        active_agent=effective_agent,
+                    )
+                    if effective_agent != "auto"
+                    else None
+                )
+                ans = await run_agent_loop(
+                    task, cloud_provider, hub, memory, cache,
+                    task_state=cloud_state,
+                    on_event=on_event,
+                    steer_queue=steer_queue,
+                    get_pending_steer=get_pending_steer,
+                )
+                if not ans.startswith(("Error: Cannot connect", "Error: Cloud API", "Error: Failed to get model response")):
+                    return ans, [cloud_provider]
+            except Exception:
+                pass
+            if on_event is not None:
+                try:
+                    res = on_event({
+                        "event": "stage",
+                        "stage": "fallback",
+                        "message": "Cloud unavailable — falling back to local Ollama pipeline...",
+                    })
+                    if inspect.isawaitable(res):
+                        await res
+                except Exception:
+                    pass
+
+    if effective_agent == "auto" and needs_multi_stage(routing_task, scope):
         print(f"  [multi-stage: analysis -> coding -> verification]")
         state = TaskState(
-            original_request=task,
+            original_request=routing_task,
             workspace=str(getattr(hub, "workspace", "")),
             read_only=getattr(hub, "read_only", True),
             stage=TaskStage.ANALYSIS,
@@ -169,19 +241,79 @@ async def _run_task(
             task, router, hub, memory, cache,
             ctx_override=ctx_override,
             task_state=state,
+            on_event=on_event,
         )
         return answer, state.used_providers
     else:
-        task_provider = _select_provider_for_task(task, router, default_provider, ctx_override)
+        task_provider = _select_provider_for_task(routing_task, router, default_provider, ctx_override, scope=scope)
+        stage_label = f"Running {effective_agent}" if effective_agent != "auto" else "Running single-pass"
+        if on_event is not None:
+            try:
+                res = on_event({
+                    "event": "stage",
+                    "stage": "single",
+                    "agent": effective_agent,
+                    "model": getattr(task_provider, "model", ""),
+                    "message": f"{stage_label} ({getattr(task_provider, 'model', 'model')})...",
+                })
+                if inspect.isawaitable(res):
+                    await res
+            except Exception:
+                pass
+        specialist_state = (
+            TaskState(
+                original_request=routing_task,
+                workspace=str(getattr(hub, "workspace", "")),
+                read_only=getattr(hub, "read_only", True),
+                active_agent=effective_agent,
+            )
+            if effective_agent != "auto"
+            else None
+        )
         try:
-            answer = await run_agent_loop(task, task_provider, hub, memory, cache)
+            answer = await run_agent_loop(
+                task, task_provider, hub, memory, cache,
+                task_state=specialist_state,
+                on_event=on_event,
+                steer_queue=steer_queue,
+                get_pending_steer=get_pending_steer,
+            )
             return answer, [task_provider]
         finally:
-            if hasattr(task_provider, "unload"):
+            if unload_on_complete and hasattr(task_provider, "unload"):
                 task_provider.unload()
 
 
+def _ensure_gui_stdio() -> None:
+    """Under pythonw.exe on Windows, sys.stdout/stderr may be None; redirect to log safely."""
+    if sys.stdout is not None and sys.stderr is not None:
+        return
+    try:
+        log_dir = Path.home() / ".aura"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_file = (log_dir / "aura_app.log").open("a", encoding="utf-8", errors="replace", buffering=1)
+        if sys.stdout is None:
+            sys.stdout = log_file
+        if sys.stderr is None:
+            sys.stderr = log_file
+    except Exception:
+        pass
+
+
+def _is_aura_server_running(url: str) -> bool:
+    """Return True if an active AURA V4 server is already listening at *url*."""
+    try:
+        import httpx
+
+        resp = httpx.get(f"{url}/api/status", timeout=1.2)
+        return resp.status_code == 200 and "mode" in resp.json()
+    except Exception:
+        return False
+
+
 async def main():
+    _ensure_gui_stdio()
+    load_aura_env()
     args = parse_args()
 
     if args.selftest:
@@ -206,6 +338,134 @@ async def main():
     authorized_workspaces: set[Path] = {workspace_path}
 
     mode_label = "read-only (ro)" if initial_read_only else "read-write (rw)"
+
+    if args.web:
+        import threading
+        import webbrowser
+        import uvicorn
+        from ..core.providers import ensure_ollama_running
+        from ..server import create_app
+
+        url = f"http://127.0.0.1:{args.port}"
+        if not os.environ.get("PYTEST_CURRENT_TEST") and _is_aura_server_running(url):
+            try:
+                import httpx
+
+                httpx.post(f"{url}/api/overlay/show", json={"expand": True}, timeout=2.0)
+            except Exception:
+                pass
+            try:
+                from ..overlay import signal_overlay_wake_event
+
+                signal_overlay_wake_event()
+            except Exception:
+                pass
+            print(f"AURA V4 is already running at {url} — surfaced Dynamic Island overlay.")
+            return
+
+        if not os.environ.get("PYTEST_CURRENT_TEST"):
+            ensure_ollama_running(timeout=8.0)
+
+        explicit_ws = (
+            workspace_path
+            if (args.workspace or os.environ.get("AURA_WORKSPACE") or args.overlay or args.mode == "rw")
+            else None
+        )
+        if args.mode in ("ro", "rw"):
+            web_read_only = args.mode == "ro"
+        elif explicit_ws is not None:
+            web_read_only = initial_read_only
+        elif args.overlay:
+            web_read_only = False
+        else:
+            web_read_only = True
+        web_mode_label = "read-only (ro)" if web_read_only else "read-write (rw)"
+
+        print(f"AURA V4 Web UI: {url} (workspace={explicit_ws or 'none'}, mode={web_mode_label})")
+        if os.environ.get("AURA_NO_BROWSER") != "1":
+            threading.Timer(1.2, lambda: webbrowser.open(url)).start()
+
+        server_holder: dict[str, Any] = {}
+        overlay_holder: dict[str, Any] = {"proc": None}
+
+        def _ensure_overlay_running() -> bool:
+            cur = overlay_holder.get("proc")
+            if cur is not None and cur.poll() is None:
+                return False
+            import subprocess
+            from ..core.mcp_hub import win32_subprocess_kwargs
+
+            py_exe = sys.executable
+            if sys.platform == "win32":
+                pythonw_candidate = Path(sys.executable).with_name("pythonw.exe")
+                if pythonw_candidate.is_file():
+                    py_exe = str(pythonw_candidate)
+            extra = win32_subprocess_kwargs(hide_window=False)
+            overlay_holder["proc"] = subprocess.Popen(
+                [py_exe, "-m", "src.aura.overlay", "--server-url", url],
+                cwd=str(Path(__file__).resolve().parents[3]),
+                **extra,
+            )
+            return True
+
+        def _request_shutdown() -> None:
+            srv = server_holder.get("server")
+            if srv is not None:
+                srv.should_exit = True
+            # Guarantee clean process exit if Windows stdio MCP transports keep keep-alive handles open
+            t = threading.Timer(2.0, lambda: os._exit(0))
+            t.daemon = True
+            t.start()
+
+        app = create_app(
+            workspace=explicit_ws,
+            read_only=web_read_only,
+            model_override=args.model,
+            low_vram=args.low_vram,
+            ctx_override=args.ctx,
+            shutdown_fn=_request_shutdown,
+            ensure_overlay_fn=_ensure_overlay_running,
+        )
+        watcher_task = None
+        if args.overlay:
+            _ensure_overlay_running()
+        try:
+            config = uvicorn.Config(
+                app,
+                host="127.0.0.1",
+                port=args.port,
+                log_level="info",
+                use_colors=bool(sys.stderr is not None and hasattr(sys.stderr, "isatty") and sys.stderr.isatty()),
+                timeout_graceful_shutdown=2.0,
+            )
+            server = uvicorn.Server(config)
+            server_holder["server"] = server
+
+            async def _watch_overlay() -> None:
+                while (
+                    overlay_holder.get("proc") is not None
+                    and overlay_holder["proc"].poll() is None
+                    and not server.should_exit
+                ):
+                    await asyncio.sleep(0.4)
+                if overlay_holder.get("proc") is not None and overlay_holder["proc"].poll() is not None:
+                    server.should_exit = True
+
+            if overlay_holder.get("proc") is not None:
+                watcher_task = asyncio.create_task(_watch_overlay())
+            await server.serve()
+        finally:
+            if watcher_task is not None:
+                watcher_task.cancel()
+            cur_proc = overlay_holder.get("proc")
+            if cur_proc is not None and cur_proc.poll() is None:
+                cur_proc.terminate()
+                try:
+                    cur_proc.wait(timeout=2.0)
+                except Exception:
+                    cur_proc.kill()
+        return
+
     print(f"AURA V4: Working on {workspace_path} [{mode_label}]")
 
     hub = McpHub(workspace_path, read_only=initial_read_only)
@@ -225,7 +485,7 @@ async def main():
 
     # Create default provider using the router's lightweight selection
     default_model = router.select(ModelRole.LIGHTWEIGHT) if not cli_model else cli_model
-    provider = ProviderFactory.create_ollama(model=default_model, num_ctx=args.ctx)
+    provider = ProviderFactory.create_for_model(model=default_model, num_ctx=args.ctx)
     print(f"AURA V4: Model={provider.model}, num_ctx={provider.default_options.num_ctx}")
     if registry.models:
         print(f"AURA V4: {len(registry.models)} model(s) available: {', '.join(registry.available_names)}")

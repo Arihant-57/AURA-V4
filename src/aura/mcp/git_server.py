@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -70,6 +71,14 @@ def run_git(*args: str) -> str:
     if not repo.is_dir():
         return f"ERROR: Repository does not exist: {repo}"
 
+    extra: dict[str, Any] = {}
+    if sys.platform == "win32":
+        extra["creationflags"] = 0x08000000
+        if hasattr(subprocess, "STARTUPINFO"):
+            si = subprocess.STARTUPINFO()
+            si.dwFlags |= getattr(subprocess, "STARTF_USESHOWWINDOW", 1)
+            si.wShowWindow = getattr(subprocess, "SW_HIDE", 0)
+            extra["startupinfo"] = si
     is_git_repo = (repo / ".git").exists()
     if not is_git_repo:
         try:
@@ -77,6 +86,7 @@ def run_git(*args: str) -> str:
                 subprocess.run(
                     ["git", "-C", str(repo), "rev-parse", "--is-inside-work-tree"],
                     capture_output=True,
+                    **extra,
                 ).returncode == 0
             )
         except Exception:
@@ -94,6 +104,7 @@ def run_git(*args: str) -> str:
             errors="replace",
             timeout=10,
             check=False,
+            **extra,
         )
 
     except subprocess.TimeoutExpired:

@@ -56,6 +56,19 @@ class TestMCPFilesystemServer(unittest.TestCase):
         content = result.content[0].text if result.content else ""
         self.assertIn("src", content)
 
+    def test_scan_repository_mcp(self):
+        async def run():
+            async with self._get_client() as client:
+                result = await client.call_tool("scan_repository", {"path": "src/aura/mcp", "max_depth": 2})
+                return result
+        result = asyncio.run(run())
+        self.assertIsNotNone(result)
+        self.assertFalse(result.is_error)
+        content = result.content[0].text if result.content else ""
+        self.assertIn("Repository Scan:", content)
+        self.assertIn("Key Source Files & Symbols", content)
+        self.assertIn("scan_repository", content)
+
     def test_read_file_works(self):
         async def run():
             async with self._get_client() as client:

@@ -233,3 +233,51 @@ class TestPermissionFlow:
         monkeypatch.setattr("builtins.input", raise_ki)
         assert prompt_confirm("Authorize external access?") is False
 
+
+@pytest.mark.asyncio
+async def test_agent_loop_preserves_browser_and_jarvis_tools_for_session_followups():
+    captured_tools = []
+    captured_sys_prompts = []
+
+    provider = MagicMock(spec=OllamaProvider)
+    provider.model = "qwen3.5:4b"
+
+    async def fake_chat(messages, tools=None):
+        captured_sys_prompts.append(messages[0]["content"])
+        captured_tools.append([t["function"]["name"] for t in (tools or [])])
+        return MagicMock(message=MagicMock(content="Playing trailer on YouTube.", role="assistant", tool_calls=[]))
+
+    provider.chat = AsyncMock(side_effect=fake_chat)
+
+    hub = MagicMock(spec=McpHub)
+    hub.workspace = Path("C:/Users/ariha/local-ai-lab/phase4-agent")
+    hub.read_only = False
+    hub.broken = set()
+
+    def _mk_tool(name):
+        t = MagicMock()
+        t.name = name
+        t.description = name
+        t.inputSchema = {"type": "object", "properties": {}}
+        return t
+
+    hub.tools = {
+        n: _mk_tool(n)
+        for n in ("read_file", "jarvis_open_website", "jarvis_play_youtube", "browser_navigate", "desktop_launch_app")
+    }
+    hub.tool_clients = {}
+    hub.tool_schemas = {n: {} for n in hub.tools}
+
+    prompt = (
+        "[Project Memory from earlier in this session]\n"
+        "- User: Open Chrome and search YouTube for Avengers Endgame\n"
+        "- AURA: Opened YouTube search results.\n\n"
+        "[Current Request]\nOkay, do it."
+    )
+    res = await run_agent_loop(prompt, provider, hub, SessionMemory(), ResultCache(ttl_seconds=300))
+    assert "Playing trailer" in res
+    assert "jarvis_play_youtube" in captured_tools[0]
+    assert "browser_navigate" in captured_tools[0]
+    assert "desktop_launch_app" in captured_tools[0]
+    assert "NEVER claim you are a text-only AI assistant" in captured_sys_prompts[0]
+

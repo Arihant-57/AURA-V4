@@ -66,6 +66,9 @@ class MCPSettings:
     """MCP server settings."""
     filesystem_server_filename: str = "filesystem_server.py"
     git_server_filename: str = "git_server.py"
+    desktop_server_filename: str = "desktop_server.py"
+    jarvis_server_filename: str = "jarvis_server.py"
+    browser_server_filename: str = "browser_server.py"
     tool_timeout_seconds: int = 30
     max_tool_result_chars: int = 3000
     shortened_tool_result_chars: int = 600
@@ -156,6 +159,75 @@ class Settings:
     @classmethod
     def reset(cls) -> None:
         cls._instance = None
+
+
+def get_default_env_path() -> Path:
+    """Return user-scoped SSD .env path (~/.aura/.env) persisted across reboots."""
+    return Path.home() / ".aura" / ".env"
+
+
+def get_default_storage_dir() -> Path:
+    """Return the accessible SSD folder for AURA chats, projects, and workspace memory."""
+    env_dir = os.environ.get("AURA_STORAGE_DIR", "").strip()
+    if env_dir:
+        return Path(env_dir).expanduser().resolve()
+    return Path(__file__).resolve().parents[3] / "aura_memory_and_storage"
+
+
+def _parse_env_file(path: Path) -> dict[str, str]:
+    parsed: dict[str, str] = {}
+    if not path.exists() or not path.is_file():
+        return parsed
+    try:
+        for raw in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, val = line.split("=", 1)
+            key = key.strip()
+            val = val.strip().strip('"').strip("'")
+            if key:
+                parsed[key] = val
+    except Exception:
+        pass
+    return parsed
+
+
+def load_aura_env(extra_paths: list[Path] | None = None) -> None:
+    """Load persisted API keys/settings from .env, repo root .env, and ~/.aura/.env."""
+    repo_root_env = Path(__file__).resolve().parents[3] / ".env"
+    candidates: list[Path] = [Path.cwd() / ".env", repo_root_env, get_default_storage_dir() / ".env", get_default_env_path()]
+    if extra_paths:
+        candidates = list(extra_paths) + candidates
+    for path in candidates:
+        for k, v in _parse_env_file(path).items():
+            if v and not os.environ.get(k):
+                os.environ[k] = v
+    if not os.environ.get("GEMINI_API_KEY"):
+        alt_gemini = (os.environ.get("GEMINIAPI_KEY") or os.environ.get("GOOGLE_API_KEY") or "").strip()
+        if alt_gemini:
+            os.environ["GEMINI_API_KEY"] = alt_gemini
+
+
+def save_env_vars(updates: dict[str, str], env_path: Path | None = None) -> Path:
+    """Persist key=value settings to SSD (~/.aura/.env) and apply immediately."""
+    target = env_path or get_default_env_path()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    current = _parse_env_file(target)
+    for k, v in updates.items():
+        clean_k = str(k).strip()
+        clean_v = str(v).strip()
+        if not clean_k:
+            continue
+        if clean_v:
+            current[clean_k] = clean_v
+            os.environ[clean_k] = clean_v
+        else:
+            current.pop(clean_k, None)
+            os.environ.pop(clean_k, None)
+    lines = [f"{k}={v}" for k, v in sorted(current.items())]
+    target.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+    return target
 
 
 def get_settings() -> Settings:

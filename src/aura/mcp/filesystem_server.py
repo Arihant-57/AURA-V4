@@ -18,8 +18,11 @@ Path safety:
 
 from __future__ import annotations
 
+import ast
 import difflib
+import fnmatch
 import os
+import re
 import subprocess
 import sys
 import unicodedata
@@ -233,6 +236,210 @@ def list_directory(path: str = ".") -> str:
 
 
 # ============================================================
+# REPOSITORY SCANNER (HOLISTIC CODEBASE SURVEY)
+# ============================================================
+
+_SCAN_EXCLUDED_DIRS = frozenset({
+    ".git", ".next", "node_modules", ".venv", "venv",
+    "__pycache__", ".pytest_cache", "dist", "build",
+    ".mypy_cache", ".ruff_cache", ".aura",
+})
+_MANIFEST_NAMES = frozenset({
+    "pyproject.toml", "setup.py", "setup.cfg", "requirements.txt",
+    "package.json", "tsconfig.json", "cargo.toml", "go.mod",
+    "dockerfile", "docker-compose.yml", "docker-compose.yaml",
+    "makefile", "readme.md", ".env.example", "agents.md",
+})
+
+
+def _extract_py_symbols(content: str, limit: int = 8) -> list[str]:
+    symbols: list[str] = []
+    try:
+        tree = ast.parse(content)
+    except SyntaxError:
+        return symbols
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef):
+            symbols.append(f"class {node.name}")
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            symbols.append(f"def {node.name}()")
+        if len(symbols) >= limit:
+            break
+    return symbols
+
+
+@mcp.tool()
+def scan_repository(path: str = ".", max_depth: int = 3, include_symbols: bool = True) -> str:
+    """Scan a repository or directory in one call: manifests, tree structure, extension counts, tests, and key source symbols."""
+    try:
+        root = safe_path(path or ".")
+    except ValueError as exc:
+        return f"ERROR: {exc}"
+
+    if not root.exists():
+        return f"ERROR: Directory does not exist: {path}"
+    if not root.is_dir():
+        return f"ERROR: Not a directory: {path}"
+
+    depth_limit = max(1, min(int(max_depth), 6))
+    try:
+        workspace = _get_workspace()
+    except ValueError:
+        workspace = root
+
+    manifests: list[str] = []
+    test_files: list[str] = []
+    ext_counts: dict[str, int] = {}
+    tree_lines: list[str] = []
+    source_entries: list[str] = []
+    total_files = 0
+    total_dirs = 0
+
+    for cur_root, dirnames, filenames in os.walk(root):
+        dirnames[:] = sorted(
+            d for d in dirnames
+            if d not in _SCAN_EXCLUDED_DIRS and not d.startswith(".git")
+        )
+        filenames = sorted(filenames)
+        cur_path = Path(cur_root)
+        rel_dir = cur_path.relative_to(root)
+        rel_depth = 0 if rel_dir == Path(".") else len(rel_dir.parts)
+
+        if rel_depth > depth_limit:
+            dirnames[:] = []
+            continue
+
+        if rel_depth > 0 and len(tree_lines) < 120:
+            indent = "  " * (rel_depth - 1)
+            tree_lines.append(f"{indent}{rel_dir.parts[-1]}/")
+
+        total_dirs += len(dirnames)
+        for fname in filenames:
+            total_files += 1
+            fpath = cur_path / fname
+            ext = fpath.suffix.lower() or "(no ext)"
+            ext_counts[ext] = ext_counts.get(ext, 0) + 1
+
+            try:
+                rel_ws = str(fpath.relative_to(workspace)).replace("\\", "/")
+            except ValueError:
+                rel_ws = str(fpath.relative_to(root)).replace("\\", "/")
+
+            if fname.lower() in _MANIFEST_NAMES:
+                manifests.append(rel_ws)
+
+            low_name = fname.lower()
+            if (
+                low_name.startswith("test_")
+                or low_name.endswith(("_test.py", ".test.ts", ".test.tsx", ".spec.ts", ".spec.js"))
+            ):
+                test_files.append(rel_ws)
+
+            if len(tree_lines) < 120:
+                indent = "  " * rel_depth
+                tree_lines.append(f"{indent}{fname}")
+
+            if (
+                include_symbols
+                and len(source_entries) < 25
+                and ext in {".py", ".ts", ".tsx", ".js", ".jsx"}
+                and rel_ws not in test_files
+            ):
+                try:
+                    raw = fpath.read_text(encoding="utf-8", errors="replace")
+                    line_count = len(raw.splitlines())
+                    if ext == ".py":
+                        syms = _extract_py_symbols(raw)
+                        sym_txt = f" -> {', '.join(syms)}" if syms else ""
+                    else:
+                        sym_txt = ""
+                    source_entries.append(f"- `{rel_ws}` ({line_count} lines){sym_txt}")
+                except Exception:
+                    pass
+
+    top_exts = sorted(ext_counts.items(), key=lambda kv: (-kv[1], kv[0]))[:10]
+    ext_summary = ", ".join(f"{ext}: {cnt}" for ext, cnt in top_exts) or "(none)"
+
+    sections: list[str] = [
+        f"Repository Scan: {root.name} ({path or '.'})",
+        f"- Files scanned: {total_files} | Subdirectories: {total_dirs} | Max depth: {depth_limit}",
+        f"- File types: {ext_summary}",
+        f"- Manifests & docs: {', '.join(manifests[:20]) if manifests else '(none detected)'}",
+        f"- Test files detected: {len(test_files)}" + (f" ({', '.join(test_files[:10])})" if test_files else ""),
+    ]
+    if tree_lines:
+        trunc = "\n... [tree truncated]" if len(tree_lines) >= 120 else ""
+        sections.append("### Directory Structure\n```\n" + "\n".join(tree_lines) + trunc + "\n```")
+    if source_entries:
+        sections.append("### Key Source Files & Symbols\n" + "\n".join(source_entries))
+    return "\n\n".join(sections)
+
+
+# ============================================================
+# FILE OUTLINE (AST / STRUCTURE MAP)
+# ============================================================
+
+@mcp.tool()
+def file_outline(path: str) -> str:
+    """Return structural symbols (classes, functions, methods, headings) and line ranges for a file."""
+    try:
+        target = safe_path(path)
+    except ValueError as exc:
+        return f"ERROR: {exc}"
+
+    if not target.exists():
+        return f"ERROR: File does not exist: {path}"
+    if not target.is_file():
+        return f"ERROR: Not a file: {path}"
+
+    try:
+        content = target.read_text(encoding="utf-8", errors="replace")
+    except Exception as exc:
+        return f"ERROR reading file for outline: {exc}"
+
+    lines = content.splitlines()
+    entries: list[str] = []
+    syntax_note = ""
+
+    if target.suffix.lower() == ".py":
+        try:
+            tree = ast.parse(content)
+            for node in tree.body:
+                if isinstance(node, ast.ClassDef):
+                    end_ln = getattr(node, "end_lineno", node.lineno)
+                    entries.append(f"L{node.lineno}-L{end_ln} class {node.name}")
+                    for child in node.body:
+                        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                            c_end = getattr(child, "end_lineno", child.lineno)
+                            prefix = "async def" if isinstance(child, ast.AsyncFunctionDef) else "def"
+                            entries.append(f"  L{child.lineno}-L{c_end} {prefix} {node.name}.{child.name}()")
+                elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    end_ln = getattr(node, "end_lineno", node.lineno)
+                    prefix = "async def" if isinstance(node, ast.AsyncFunctionDef) else "def"
+                    entries.append(f"L{node.lineno}-L{end_ln} {prefix} {node.name}()")
+        except SyntaxError as exc:
+            syntax_note = f"[SYNTAX ERROR at L{exc.lineno}: {exc.msg}]\n"
+
+    if not entries:
+        sym_re = re.compile(
+            r"^\s*(?:export\s+(?:default\s+)?)?(?:async\s+)?(?:function|class|def|interface|type)\s+([A-Za-z_][A-Za-z0-9_]*)"
+            r"|^\s*(?:export\s+)?const\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:async\s+)?\("
+            r"|^(#{1,3}\s+.+)$"
+        )
+        for idx, line in enumerate(lines, start=1):
+            m = sym_re.match(line)
+            if m:
+                entries.append(f"L{idx}: {line.strip()[:100]}")
+
+    header = f"Outline for {path} ({len(lines)} lines):"
+    if syntax_note:
+        header = syntax_note + header
+    if not entries:
+        return f"{header}\n(no top-level symbols detected)"
+    return header + "\n" + "\n".join(entries[:120])
+
+
+# ============================================================
 # SEARCH FILES
 # ============================================================
 
@@ -240,8 +447,15 @@ def list_directory(path: str = ".") -> str:
 def search_files(
     query: str,
     path: str = ".",
+    use_regex: bool = False,
+    file_glob: str = "",
 ) -> str:
-    """Search supported UTF-8 source files recursively inside the workspace."""
+    """Search supported UTF-8 source files recursively inside the workspace.
+
+    Optional filters:
+    - use_regex: interpret *query* as a case-insensitive regular expression.
+    - file_glob: fnmatch pattern (e.g. '*.py', 'src/aura/*') filtering relative paths or names.
+    """
 
     if not isinstance(query, str) or not query.strip():
         return "ERROR: Search query cannot be empty."
@@ -257,7 +471,15 @@ def search_files(
     if not target.is_dir():
         return f"ERROR: Search path is not a directory: {path}"
 
+    pattern = None
+    if use_regex:
+        try:
+            pattern = re.compile(query, re.IGNORECASE)
+        except re.error as exc:
+            return f"ERROR: Invalid regex pattern '{query}': {exc}"
+
     query_lower = query.lower()
+    glob_filter = (file_glob or "").strip().replace("\\", "/")
 
     supported_extensions = {
         ".txt",
@@ -284,6 +506,7 @@ def search_files(
     }
 
     results = []
+    workspace = _get_workspace()
 
     try:
         for file_path in target.rglob("*"):
@@ -292,6 +515,12 @@ def search_files(
             if file_path.suffix.lower() not in supported_extensions:
                 continue
             if any(part in excluded_directories for part in file_path.parts):
+                continue
+            relative_str = str(file_path.relative_to(workspace)).replace("\\", "/")
+            if glob_filter and not (
+                fnmatch.fnmatch(file_path.name, glob_filter)
+                or fnmatch.fnmatch(relative_str, glob_filter)
+            ):
                 continue
             try:
                 content = file_path.read_text(
@@ -304,11 +533,10 @@ def search_files(
                 content.splitlines(),
                 start=1,
             ):
-                if query_lower in line.lower():
-                    workspace = _get_workspace()
-                    relative = file_path.relative_to(workspace)
+                matched = bool(pattern.search(line)) if pattern is not None else (query_lower in line.lower())
+                if matched:
                     results.append(
-                        f"{relative}:{line_number}: {line.strip()}"
+                        f"{relative_str}:{line_number}: {line.strip()}"
                     )
                     if len(results) >= 100:
                         return "\n".join(
@@ -521,6 +749,14 @@ def run_tests(test_path: str = "") -> str:
             return f"ERROR invalid test_path: {exc}"
 
     try:
+        extra: dict[str, Any] = {}
+        if sys.platform == "win32":
+            extra["creationflags"] = 0x08000000
+            if hasattr(subprocess, "STARTUPINFO"):
+                si = subprocess.STARTUPINFO()
+                si.dwFlags |= getattr(subprocess, "STARTF_USESHOWWINDOW", 1)
+                si.wShowWindow = getattr(subprocess, "SW_HIDE", 0)
+                extra["startupinfo"] = si
         res = subprocess.run(
             cmd,
             cwd=str(workspace),
@@ -529,7 +765,8 @@ def run_tests(test_path: str = "") -> str:
             encoding="utf-8",
             errors="replace",
             timeout=30,
-            check=False
+            check=False,
+            **extra,
         )
     except subprocess.TimeoutExpired:
         return "ERROR: Test execution timed out after 30 seconds."

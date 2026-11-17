@@ -72,3 +72,10 @@ models/
 *.db
 *.sqlite
 *.sqlite3
+
+# Local AURA Memory, Credentials & Chat Storage
+aura_memory_and_storage/
+.aura/
+google_config.json
+*.pem
+*.key

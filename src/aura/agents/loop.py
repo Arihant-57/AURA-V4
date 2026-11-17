@@ -12,12 +12,16 @@ Coordinates:
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import inspect
 import json
 import logging
+import queue
 import re
 import time
+from collections import deque
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from ..config import get_settings
 from ..core import (
@@ -26,17 +30,38 @@ from ..core import (
     mcp_tool_to_ollama, mcp_result_to_text, validate_arguments,
     normalize_tool_arguments, validate_diagnosis_answer, validate_control_flow,
     is_prefetch_candidate, collect_prefetch_evidence, evidence_is_sufficient,
-    ExecutionController, InspectionTracker,
+    ExecutionController, InspectionTracker, LoopGuard, LoopGuardConfig,
     ErrorCategory, classify_tool_result, is_tool_error_text,
 )
+from ..core.file_tracker import _merge_ranges
 from ..core.providers import OllamaProvider
+from ..core.scope import detect_browser_intent, detect_desktop_intent, detect_jarvis_intent
 from ..core.model_router import TaskState, TaskStage
 from ..core.prompts import (
-    SYSTEM_PROMPT, DIAGNOSIS_NUDGE_MESSAGE, CHANGE_PLAN_NUDGE_MESSAGE,
+    SYSTEM_PROMPT, JARVIS_CONVERSATIONAL_PROMPT, JARVIS_ASSISTANT_PROMPT,
+    CODING_RULES, SPECIALIST_ROLE_PROMPTS,
+    DIAGNOSIS_NUDGE_MESSAGE, CHANGE_PLAN_NUDGE_MESSAGE,
     FALLBACK_NUDGE_MESSAGE
 )
 
 logger = logging.getLogger(__name__)
+
+# Pure read-only tools that can safely execute concurrently within a single turn.
+_PARALLEL_SAFE_TOOLS: frozenset[str] = frozenset({
+    "read_file", "list_directory", "search_files", "file_outline", "scan_repository", "get_file_diff",
+    "git_status", "git_branch", "git_log", "git_diff", "git_ls_files",
+    "jarvis_web_search", "jarvis_fetch_url", "desktop_list_windows", "desktop_list_monitors",
+    "desktop_system_info", "desktop_find_files", "desktop_inspect_cursor", "desktop_inspect_path",
+})
+
+# Poll/snapshot/OCR tools subject to LoopGuard poll budgeting and stale-noise compaction.
+_POLL_TOOLS: frozenset[str] = frozenset({
+    "desktop_read_screen_ocr", "desktop_ui_see", "desktop_list_windows",
+    "desktop_inspect_cursor", "browser_snapshot",
+})
+_NOISY_SUPERSEDABLE_TOOLS: frozenset[str] = _POLL_TOOLS | frozenset({
+    "list_directory", "search_files", "desktop_find_files",
+})
 
 
 async def execute_tool_call(
@@ -97,9 +122,13 @@ async def execute_tool_call(
     except asyncio.TimeoutError:
         text = f"MCP TOOL ERROR: tool '{name}' timed out after {timeout}s."
         meta["error"] = True
+        if hasattr(hub, "mark_broken") and hasattr(hub, "tool_server"):
+            hub.mark_broken(hub.tool_server.get(name, ""))
     except Exception as e:
         text = f"MCP TOOL ERROR: {e}"
         meta["error"] = True
+        if hasattr(hub, "mark_broken") and hasattr(hub, "tool_server"):
+            hub.mark_broken(hub.tool_server.get(name, ""))
 
     meta["duration"] = time.perf_counter() - start
 
@@ -110,13 +139,15 @@ async def execute_tool_call(
             # Never cache mutating or test operations; invalidate any cached reads
             if name in {"write_file", "edit_file"}:
                 cache.invalidate_path(arguments.get("path", ""))
+                if hasattr(cache, "invalidate_mutation"):
+                    cache.invalidate_mutation()
                 memory.note_modified(arguments.get("path", ""))
         else:
             cache.put(signature, sanitized)
-    if name == "read_file":
-        memory.note_file(arguments.get("path", ""))
-    elif name == "list_directory":
-        memory.note_dir(arguments.get("path", "."))
+        if name == "read_file":
+            memory.note_file(arguments.get("path", ""))
+        elif name == "list_directory":
+            memory.note_dir(arguments.get("path", "."))
 
     return sanitized, meta
 
@@ -150,16 +181,18 @@ def _serialize_tool_calls(tool_calls: list) -> list[dict]:
 def _deduplicate_tool_calls(tool_calls: list[tuple[str, dict]]) -> list[tuple[str, dict]]:
     """Remove duplicate tool calls within a single turn.
 
-    Small models sometimes emit the same call multiple times in one turn.
-    Keep only the first occurrence of each (name, args) pair.
+    Small models sometimes emit the same call multiple times in one turn
+    (occasionally using parameter aliases like ``file_path`` vs ``path``).
+    Normalize arguments and keep only the first occurrence of each (name, args) pair.
     """
     seen: set[tuple[str, str]] = set()
     unique = []
     for name, args in tool_calls:
-        key = (name, json.dumps(args, sort_keys=True))
+        norm_args = normalize_tool_arguments(name, args if isinstance(args, dict) else {})
+        key = (name, json.dumps(norm_args, sort_keys=True))
         if key not in seen:
             seen.add(key)
-            unique.append((name, args))
+            unique.append((name, norm_args))
     return unique
 
 
@@ -254,8 +287,10 @@ def _parse_text_tool_calls(content: str, active_tool_names: set[str]) -> list[tu
                 clean_arg = arg_str.strip().strip("'\"`")
                 if "\n" in clean_arg:
                     clean_arg = clean_arg.splitlines()[0].strip().strip("'\"`")
-                if name in {"read_file", "file_outline", "list_directory"}:
+                if name in {"read_file", "file_outline", "list_directory", "scan_repository"}:
                     calls.append((name, {"path": clean_arg}))
+                elif name == "search_files":
+                    calls.append((name, {"query": clean_arg}))
     if calls:
         return calls
 
@@ -266,7 +301,7 @@ def _parse_text_tool_calls(content: str, active_tool_names: set[str]) -> list[tu
             raw_args = match.group(1).strip()
             args = {}
             if not raw_args:
-                if name in {"list_directory", "get_file_diff", "run_tests"}:
+                if name in {"list_directory", "scan_repository", "get_file_diff", "run_tests", "git_status", "git_branch", "git_log", "git_diff", "git_ls_files", "desktop_system_info"}:
                     calls.append((name, {}))
                 continue
             kw_matches = re.findall(r'([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*(["\'](?:\\.|[^"\'])*["\']|\d+|True|False)', raw_args)
@@ -286,8 +321,10 @@ def _parse_text_tool_calls(content: str, active_tool_names: set[str]) -> list[tu
                 calls.append((name, args))
             else:
                 val = raw_args.strip().strip('"\'`')
-                if name in {"read_file", "file_outline", "list_directory"}:
+                if name in {"read_file", "file_outline", "list_directory", "scan_repository"}:
                     calls.append((name, {"path": val}))
+                elif name == "search_files":
+                    calls.append((name, {"query": val}))
                 elif name == "search_code":
                     calls.append((name, {"pattern": val}))
                 elif name == "run_tests":
@@ -314,8 +351,10 @@ def _parse_text_tool_calls(content: str, active_tool_names: set[str]) -> list[tu
                         pass
                 clean_val = rest.strip().strip("\"'`")
                 if clean_val:
-                    if name in {"read_file", "file_outline", "list_directory"}:
+                    if name in {"read_file", "file_outline", "list_directory", "scan_repository"}:
                         calls.append((name, {"path": clean_val}))
+                    elif name == "search_files":
+                        calls.append((name, {"query": clean_val}))
                     elif name == "search_code":
                         calls.append((name, {"pattern": clean_val}))
                     elif name == "run_tests":
@@ -343,7 +382,11 @@ def _parse_text_tool_calls(content: str, active_tool_names: set[str]) -> list[tu
 def _looks_like_tool_call(content: str) -> bool:
     """Check if content looks like a malformed or text-based tool call."""
     lowered = content.strip().lower()
-    tool_keywords = ("read_file", "write_file", "edit_file", "list_directory", "file_outline", "search_code", "run_tests", "get_file_diff")
+    tool_keywords = (
+        "read_file", "write_file", "edit_file", "list_directory", "scan_repository",
+        "file_outline", "search_files", "search_code", "run_tests", "get_file_diff",
+        "git_status", "git_diff", "git_log", "jarvis_open_website", "desktop_system_info",
+    )
     if "<tool_call>" in lowered:
         return True
     if "```json" in lowered and ("\"tool\"" in lowered or "\"name\"" in lowered or "\"arguments\"" in lowered):
@@ -362,8 +405,8 @@ def prune_conversation_history(messages: list[dict], settings: Any) -> list[dict
     """Prune and compact older tool results to stay well within context budget.
 
     Preserves all message roles and sequence (required by tool-calling API),
-    while shortening older bulky tool results when the history exceeds
-    the configured token threshold or tool result count limit.
+    compacts superseded noisy snapshots/listings, and shortens older bulky
+    tool results when history exceeds configured thresholds.
     """
     tool_indices = [i for i, m in enumerate(messages) if m.get("role") == "tool"]
     keep_recent = getattr(settings.agent, "keep_recent_tool_results", 4)
@@ -379,6 +422,12 @@ def prune_conversation_history(messages: list[dict], settings: Any) -> list[dict
     if not needs_pruning or len(tool_indices) <= keep_recent:
         return messages
 
+    latest_idx_by_tool: dict[str, int] = {}
+    for idx in tool_indices:
+        tname = messages[idx].get("name") or ""
+        if tname:
+            latest_idx_by_tool[tname] = idx
+
     # Keep the most recent `keep_recent` tool messages intact; shorten older ones
     older_indices = set(tool_indices[:-keep_recent])
 
@@ -386,17 +435,158 @@ def prune_conversation_history(messages: list[dict], settings: Any) -> list[dict
     for idx, msg in enumerate(messages):
         if idx in older_indices and msg.get("role") == "tool":
             content = msg.get("content") or ""
-            if len(content) > shortened_limit:
+            tname = msg.get("name") or ""
+            is_superseded_noise = (
+                tname in _NOISY_SUPERSEDABLE_TOOLS
+                and latest_idx_by_tool.get(tname, -1) > idx
+            )
+            target_limit = min(shortened_limit, 240) if is_superseded_noise else shortened_limit
+            compact_content = re.sub(r"\n{3,}", "\n\n", content) if is_superseded_noise else content
+            if len(compact_content) > target_limit or is_superseded_noise and len(content) > target_limit:
                 new_msg = dict(msg)
+                note = f"superseded older {tname}, " if is_superseded_noise else ""
                 new_msg["content"] = (
-                    content[:shortened_limit]
-                    + f"\n\n[PRUNED: older tool result shortened ({len(content)} chars -> {shortened_limit})]"
+                    compact_content[:target_limit]
+                    + f"\n\n[PRUNED: older tool result shortened ({note}{len(content)} chars -> {target_limit})]"
                 )
                 pruned.append(new_msg)
                 continue
         pruned.append(msg)
 
     return pruned
+
+
+def _coerce_steer_items(raw: Any) -> list[str]:
+    """Normalize pending steer values into non-empty stripped strings."""
+    if not raw:
+        return []
+    if isinstance(raw, str):
+        clean = raw.strip()
+        return [clean] if clean else []
+    items: list[str] = []
+    if isinstance(raw, (list, tuple, deque)):
+        for elem in raw:
+            if isinstance(elem, str) and elem.strip():
+                items.append(elem.strip())
+    return items
+
+
+def _drain_steer_queue(steer_queue: Any) -> list[str]:
+    """Non-blockingly drain any pending steer instructions from a queue/deque/list."""
+    if steer_queue is None:
+        return []
+    drained: list[str] = []
+    try:
+        if hasattr(steer_queue, "get_nowait"):
+            while True:
+                try:
+                    item = steer_queue.get_nowait()
+                except (queue.Empty, asyncio.QueueEmpty):
+                    break
+                drained.extend(_coerce_steer_items(item))
+        elif isinstance(steer_queue, deque):
+            while steer_queue:
+                drained.extend(_coerce_steer_items(steer_queue.popleft()))
+        elif isinstance(steer_queue, list):
+            if steer_queue:
+                snapshot = list(steer_queue)
+                steer_queue.clear()
+                drained.extend(_coerce_steer_items(snapshot))
+        elif hasattr(steer_queue, "pop_pending_steers") and callable(steer_queue.pop_pending_steers):
+            drained.extend(_coerce_steer_items(steer_queue.pop_pending_steers()))
+    except Exception as exc:
+        logger.debug("Failed to drain steer_queue cleanly: %s", exc)
+    return drained
+
+
+async def _drain_pending_steers(
+    steer_queue: Any = None,
+    get_pending_steer: Callable[[], Any] | None = None,
+    memory: Any = None,
+) -> list[str]:
+    """Drain FIFO mid-run user steer instructions from explicit hooks or memory fallback."""
+    collected: list[str] = []
+    if callable(get_pending_steer):
+        try:
+            raw = get_pending_steer()
+            if inspect.isawaitable(raw):
+                raw = await raw
+            collected.extend(_coerce_steer_items(raw))
+        except Exception as exc:
+            logger.debug("get_pending_steer failed cleanly: %s", exc)
+    if steer_queue is not None:
+        collected.extend(_drain_steer_queue(steer_queue))
+    if get_pending_steer is None and steer_queue is None and memory is not None:
+        mem_getter = getattr(memory, "get_pending_steer", None) or getattr(memory, "drain_steers", None)
+        if callable(mem_getter):
+            try:
+                raw = mem_getter()
+                if inspect.isawaitable(raw):
+                    raw = await raw
+                collected.extend(_coerce_steer_items(raw))
+            except Exception as exc:
+                logger.debug("memory.get_pending_steer failed cleanly: %s", exc)
+        mem_queue = getattr(memory, "steer_queue", None)
+        if mem_queue is not None:
+            collected.extend(_drain_steer_queue(mem_queue))
+    return collected
+
+
+def _classify_terminal_tool_outcome(res_text: str) -> str | None:
+    """Detect authoritative blocking or terminal tool responses for fast-exit decisions."""
+    stripped = (res_text or "").lstrip()
+    if stripped.startswith(("SSRF BLOCKED:", "SECURITY BLOCKED:")):
+        return "security_blocked"
+    if stripped.startswith("READ-ONLY BLOCKED:"):
+        return "ro_blocked"
+    if stripped.startswith("NOT FOUND:"):
+        return "not_found"
+    return None
+
+
+def _check_already_inspected_read(
+    tracker: InspectionTracker,
+    arguments: dict,
+) -> str | None:
+    """Return a concise notice when a new read_file call overlaps already-read complete ranges."""
+    path = arguments.get("path", "")
+    if not isinstance(path, str) or not path.strip():
+        return None
+    fi = tracker.get(path)
+    if fi is None:
+        return None
+
+    req_start = arguments.get("start_line")
+    req_end = arguments.get("end_line")
+    if req_start is None and req_end is None:
+        if fi.total_lines is not None and fi.is_complete:
+            return (
+                f"ALREADY INSPECTED: '{path}' was already read in full "
+                f"({fi.lines_read}/{fi.total_lines} lines). Use the contents already in context."
+            )
+        return None
+
+    if isinstance(req_start, int) or isinstance(req_end, int):
+        rs = req_start if isinstance(req_start, int) and req_start > 0 else 1
+        re_line = req_end if isinstance(req_end, int) and req_end >= rs else (fi.total_lines or rs)
+        for m_start, m_end in _merge_ranges(fi.read_ranges):
+            if m_start <= rs and re_line <= m_end:
+                return (
+                    f"ALREADY INSPECTED: '{path}' lines {rs}-{re_line} are already in context "
+                    f"(covered by read range {m_start}-{m_end})."
+                )
+    return None
+
+
+async def _emit_loop_event(on_event: Callable[[dict[str, Any]], Any] | None, **event: Any) -> None:
+    if on_event is None:
+        return
+    try:
+        res = on_event(event)
+        if inspect.isawaitable(res):
+            await res
+    except Exception:
+        pass
 
 
 async def run_agent_loop(
@@ -408,13 +598,42 @@ async def run_agent_loop(
     *,
     task_state: TaskState | None = None,
     inspection_tracker: InspectionTracker | None = None,
+    on_event: Callable[[dict[str, Any]], Any] | None = None,
+    steer_queue: Any = None,
+    get_pending_steer: Callable[[], Any] | None = None,
 ) -> str:
     """The main reasoning loop."""
     settings = get_settings()
-    scope = TaskScope(task)
+    routing_task = task.split("[Current Request]\n", 1)[-1] if "[Current Request]\n" in task else task
+    active_agent = None
+    if task_state is not None and getattr(task_state, "active_agent", "auto") != "auto":
+        active_agent = task_state.active_agent
+    scope = TaskScope(routing_task, agent_role=active_agent)
+    if (
+        "[Current Request]\n" in task
+        and scope.agent_role == "auto"
+        and not scope.conversational
+        and not (scope.git or scope.backend or scope.frontend)
+        and not (scope.desktop or scope.jarvis or scope.browser)
+    ):
+        prior_context = task.split("[Current Request]\n", 1)[0]
+        if (
+            detect_desktop_intent(prior_context)
+            or detect_jarvis_intent(prior_context)
+            or detect_browser_intent(prior_context)
+        ):
+            scope.desktop = True
+            scope.jarvis = True
+            scope.browser = True
     controller = ExecutionController(
         max_steps=settings.agent.max_steps,
         extension_budget=max(3, settings.agent.max_steps // 2),
+    )
+    loop_guard = LoopGuard(
+        LoopGuardConfig(
+            max_identical_calls=3,
+            ping_pong_window=8,
+        )
     )
     if inspection_tracker is None:
         inspection_tracker = InspectionTracker()
@@ -436,12 +655,34 @@ async def run_agent_loop(
     ollama_tools = [mcp_tool_to_ollama(t, scope) for t in active_tools]
 
     # Build clear system prompt from centralized source
-    system_prompt = SYSTEM_PROMPT
+    model_label = str(getattr(provider, "model", "") or "local-ollama")
+    if scope.conversational:
+        system_prompt = (
+            JARVIS_CONVERSATIONAL_PROMPT
+            + f"\nActive model: {model_label} running inside the AURA V4 Agent framework.\n"
+        )
+    elif (scope.jarvis or scope.desktop or scope.browser) and not (scope.git or scope.backend or scope.frontend):
+        has_repo_coding_intent = any(
+            w in scope.prompt_lower
+            for w in ("repo", "repository", "codebase", "scan", "implement", "fix", "edit", "write", "refactor", "test", "code", "file")
+        )
+        base_prompt = f"{JARVIS_ASSISTANT_PROMPT}\n{CODING_RULES}" if has_repo_coding_intent else JARVIS_ASSISTANT_PROMPT
+        system_prompt = (
+            base_prompt
+            + f"\nActive model: {model_label} running inside the AURA V4 Agent framework.\n"
+        )
+    else:
+        system_prompt = (
+            SYSTEM_PROMPT
+            + f"\nActive model: {model_label} running inside the AURA V4 Agent framework.\n"
+        )
+    if scope.agent_role != "auto" and scope.agent_role in SPECIALIST_ROLE_PROMPTS and not scope.conversational:
+        system_prompt += SPECIALIST_ROLE_PROMPTS[scope.agent_role] + "\n"
     if active_tool_names:
         system_prompt += "\nAvailable tools: " + ", ".join(sorted(active_tool_names)) + ".\n"
 
     ws = getattr(hub, "workspace", None)
-    if isinstance(ws, (Path, str)):
+    if not scope.conversational and isinstance(ws, (Path, str)):
         mode_str = "read-only" if getattr(hub, "read_only", False) else "read-write"
         system_prompt += f"\nWorkspace root: {ws} (Access mode: {mode_str})\n"
         if getattr(hub, "read_only", False):
@@ -459,20 +700,91 @@ async def run_agent_loop(
     executed_calls: set[tuple[str, str]] = set()
     consecutive_duplicate_turns = 0
     consecutive_failed_turns = 0
+    ro_blocked_turns = 0
+    not_found_turns = 0
+    has_prior_useful_results = False
+    last_poll_digests: dict[str, str] = {}
+    poll_stall_counts: dict[str, int] = {}
+    last_partial_output = ""
+    extra_steer_steps = 0
     empty_reply_count = 0
     diagnosis_nudge_count = 0
     control_flow_nudge_count = 0
     fallback_nudge_count = 0
     max_empty_replies = settings.agent.max_empty_reply_nudges
 
+    async def _apply_steers(
+        steers: list[str],
+        candidate_answer: str = "",
+        *,
+        append_assistant: bool = False,
+    ) -> None:
+        nonlocal active_tools, active_tool_names, ollama_tools
+        nonlocal consecutive_duplicate_turns, consecutive_failed_turns
+        nonlocal empty_reply_count, diagnosis_nudge_count, control_flow_nudge_count
+        nonlocal fallback_nudge_count, ro_blocked_turns, not_found_turns
+        nonlocal last_partial_output, extra_steer_steps
+
+        partial_text = (candidate_answer or last_partial_output).strip()
+        if partial_text:
+            last_partial_output = partial_text
+            await _emit_loop_event(on_event, event="partial", text=partial_text)
+        if append_assistant and candidate_answer.strip():
+            messages.append({"role": "assistant", "content": candidate_answer.strip()})
+
+        await _emit_loop_event(
+            on_event,
+            event="steer",
+            stage=task_state.stage.value,
+            instructions=list(steers),
+            message=f"{task_state.stage.value}: steered -> {steers[-1][:120]}",
+        )
+
+        newly_unlocked_note = ""
+        steer_joined = "\n".join(steers)
+        if scope.agent_role == "auto" and scope.expand_for_steer(steer_joined):
+            prev_names = set(active_tool_names)
+            active_tools = select_active_tools(all_tools, scope)
+            active_tool_names = {t.name for t in active_tools}
+            ollama_tools = [mcp_tool_to_ollama(t, scope) for t in active_tools]
+            added_names = sorted(active_tool_names - prev_names)
+            if added_names:
+                newly_unlocked_note = f"\n[Unlocked tools now available: {', '.join(added_names)}]"
+
+        steer_body = "\n".join(f"- {s}" for s in steers)
+        messages.append({
+            "role": "user",
+            "content": (
+                "[USER STEER / REDIRECT — Keep useful partial findings already collected above, "
+                f"and immediately follow this new instruction:]\n{steer_body}{newly_unlocked_note}"
+            ),
+        })
+
+        consecutive_duplicate_turns = 0
+        consecutive_failed_turns = 0
+        ro_blocked_turns = 0
+        not_found_turns = 0
+        empty_reply_count = 0
+        diagnosis_nudge_count = 0
+        control_flow_nudge_count = 0
+        fallback_nudge_count = 0
+        last_poll_digests.clear()
+        poll_stall_counts.clear()
+        controller.consecutive_failures = 0
+        controller.consecutive_repeats = 0
+        if extra_steer_steps < 6:
+            extra_steer_steps += 2
+            controller.max_steps = max(controller.max_steps, controller.step + 2)
+
     # ── Deterministic Evidence Prefetch Fast Path ────────────────────────────
     if (
-        is_prefetch_candidate(task, scope)
+        not (scope.desktop or scope.jarvis or scope.browser)
+        and is_prefetch_candidate(routing_task, scope)
         and "list_directory" in active_tool_names
         and "read_file" in active_tool_names
     ):
         try:
-            evidence_items = await collect_prefetch_evidence(task, scope, hub, cache, memory)
+            evidence_items = await collect_prefetch_evidence(routing_task, scope, hub, cache, memory)
         except Exception as e:
             logger.warning("Prefetch collection failed: %s; falling back to agent loop.", e)
             evidence_items = []
@@ -520,16 +832,29 @@ async def run_agent_loop(
                                 valid = False
 
                         if valid:
-                            return synth_answer
+                            pending_steers = await _drain_pending_steers(steer_queue, get_pending_steer, memory)
+                            if pending_steers:
+                                await _apply_steers(pending_steers, synth_answer, append_assistant=True)
+                            else:
+                                return synth_answer
                 except Exception as e:
                     logger.warning("Prefetch single-synthesis failed: %s; continuing in agent loop.", e)
 
-    for step in range(settings.agent.max_steps + controller.extension_budget):
+    step = 0
+    while step < settings.agent.max_steps + controller.extension_budget + extra_steer_steps:
+        pending_steers = await _drain_pending_steers(steer_queue, get_pending_steer, memory)
+        if pending_steers:
+            await _apply_steers(pending_steers)
         if not controller.should_continue:
             break
+        current_step = step
+        step += 1
+
         # Call model with retry on transient errors only
         response = None
-        messages_to_send = prune_conversation_history(messages, settings)
+        messages_to_send = loop_guard.compress_context(
+            prune_conversation_history(messages, settings)
+        )
         for attempt in range(settings.agent.model_call_attempts):
             try:
                 response = await provider.chat(messages_to_send, tools=ollama_tools if active_tool_names else None)
@@ -595,6 +920,9 @@ async def run_agent_loop(
         assistant_msg: dict[str, Any] = {"role": "assistant", "content": content}
         if has_tool_calls and tool_calls:
             assistant_msg["tool_calls"] = [{"function": {"name": n, "arguments": a}} for n, a in tool_calls]
+            if content.strip():
+                last_partial_output = content.strip()
+                await _emit_loop_event(on_event, event="partial", text=last_partial_output)
         elif has_tool_calls:
             assistant_msg["tool_calls"] = _serialize_tool_calls(msg.tool_calls)
         messages.append(assistant_msg)
@@ -610,27 +938,155 @@ async def run_agent_loop(
                 })
                 continue
 
-            # Check if this turn is entirely duplicate calls that were already executed
-            turn_signatures = [(name, json.dumps(args, sort_keys=True)) for name, args in tool_calls]
-            is_duplicate_only = all(sig in executed_calls for sig in turn_signatures)
+            # Plan and deduplicate against executed calls & InspectionTracker
+            planned_calls: list[tuple[str, dict, tuple[str, str], bool, Any, str | None]] = []
+            for name, args in tool_calls:
+                norm_args = normalize_tool_arguments(name, args if isinstance(args, dict) else {})
+                sig = (name, json.dumps(norm_args, sort_keys=True))
+                is_repeat = sig in executed_calls
+                already_inspected = (
+                    _check_already_inspected_read(inspection_tracker, norm_args)
+                    if (name == "read_file" and not is_repeat)
+                    else None
+                )
+                verdict = loop_guard.check_call(
+                    name,
+                    norm_args,
+                    is_poll=(name in _POLL_TOOLS),
+                )
+                planned_calls.append((name, norm_args, sig, is_repeat, verdict, already_inspected))
 
+            is_duplicate_only = all(
+                is_repeat or (already_inspected is not None)
+                for _, _, _, is_repeat, _, already_inspected in planned_calls
+            )
             if is_duplicate_only:
                 consecutive_duplicate_turns += 1
             else:
                 consecutive_duplicate_turns = 0
 
-            # Execute tool calls sequentially
+            # Execute pure read-only batches concurrently; keep mutating/blocked/tracked calls deterministic
             turn_has_path_error = False
             turn_has_exec_error = False
             turn_useful = False
             last_turn_error = ""
-            for name, args in tool_calls:
-                sig = (name, json.dumps(args, sort_keys=True))
-                is_repeat = sig in executed_calls
-                res_text, meta = await execute_tool_call(
-                    name, args, step,
-                    active_tool_names=active_tool_names, hub=hub, cache=cache,
-                    memory=memory, scope=scope
+            turn_outcomes: list[str | None] = []
+            terminal_texts: list[str] = []
+
+            can_parallel = (
+                len(planned_calls) > 1
+                and all(
+                    v.action != "block" and already is None and n in _PARALLEL_SAFE_TOOLS
+                    for n, _, _, _, v, already in planned_calls
+                )
+            )
+
+            executed_batch: list[tuple[str, dict, tuple[str, str], bool, Any, str | None, str, dict]] = []
+            if can_parallel:
+                for name, _, _, _, _, _ in planned_calls:
+                    await _emit_loop_event(
+                        on_event,
+                        event="tool",
+                        stage=task_state.stage.value,
+                        tool=name,
+                        status="running",
+                        message=f"{task_state.stage.value}: running {name}...",
+                    )
+                raw_results = await asyncio.gather(
+                    *(
+                        execute_tool_call(
+                            name, args, current_step,
+                            active_tool_names=active_tool_names, hub=hub, cache=cache,
+                            memory=memory, scope=scope,
+                        )
+                        for name, args, _, _, _, _ in planned_calls
+                    )
+                )
+                for item, (res_text, meta) in zip(planned_calls, raw_results):
+                    executed_batch.append((*item, res_text, meta))
+            else:
+                for item in planned_calls:
+                    name, args, _, _, verdict, already = item
+                    if verdict.action == "block":
+                        executed_batch.append(
+                            (*item, f"BLOCKED: {verdict.reason}", {"error": True, "blocked": True})
+                        )
+                        continue
+                    if already is not None:
+                        executed_batch.append(
+                            (*item, already, {"error": False, "duplicate": True, "already_inspected": True})
+                        )
+                        continue
+                    await _emit_loop_event(
+                        on_event,
+                        event="tool",
+                        stage=task_state.stage.value,
+                        tool=name,
+                        status="running",
+                        message=f"{task_state.stage.value}: running {name}...",
+                    )
+                    res_text, meta = await execute_tool_call(
+                        name, args, current_step,
+                        active_tool_names=active_tool_names, hub=hub, cache=cache,
+                        memory=memory, scope=scope,
+                    )
+                    executed_batch.append((*item, res_text, meta))
+
+            for name, args, sig, is_repeat, verdict, already, res_text, meta in executed_batch:
+                if verdict.action == "block":
+                    await _emit_loop_event(
+                        on_event,
+                        event="tool",
+                        stage=task_state.stage.value,
+                        tool=name,
+                        status="error",
+                        message=f"{task_state.stage.value}: {name} blocked (loop guard)",
+                    )
+                    executed_calls.add(sig)
+                    messages.append({
+                        "role": "tool",
+                        "name": name,
+                        "content": res_text,
+                    })
+                    turn_has_exec_error = True
+                    last_turn_error = res_text
+                    turn_outcomes.append(None)
+                    task_state.add_execution_error(f"{name}: {verdict.reason}")
+                    continue
+
+                if verdict.action == "warn" and not meta.get("error") and not meta.get("blocked"):
+                    res_text = f"{res_text}\n[LOOP GUARD: {verdict.reason}]"
+
+                stalled_poll = False
+                if (
+                    name in _POLL_TOOLS
+                    and not meta.get("error")
+                    and not meta.get("blocked")
+                    and not meta.get("duplicate")
+                ):
+                    digest = hashlib.sha1(
+                        re.sub(r"\s+", " ", res_text).strip().encode("utf-8", errors="ignore")
+                    ).hexdigest()
+                    if last_poll_digests.get(name) == digest:
+                        poll_stall_counts[name] = poll_stall_counts.get(name, 0) + 1
+                        stalled_poll = True
+                        if poll_stall_counts[name] >= 2:
+                            res_text += (
+                                f"\n[STALL NOTICE: {name} returned identical output repeatedly. "
+                                "Stop re-polling and act on the gathered evidence or answer now.]"
+                            )
+                    else:
+                        last_poll_digests[name] = digest
+                        poll_stall_counts[name] = 0
+
+                await _emit_loop_event(
+                    on_event,
+                    event="tool",
+                    stage=task_state.stage.value,
+                    tool=name,
+                    status="error" if meta.get("error") else "done",
+                    cached=bool(meta.get("cached")),
+                    message=f"{task_state.stage.value}: {name} {'failed' if meta.get('error') else 'done'}",
                 )
                 executed_calls.add(sig)
                 messages.append({
@@ -638,6 +1094,11 @@ async def run_agent_loop(
                     "name": name,
                     "content": res_text,
                 })
+
+                outcome = _classify_terminal_tool_outcome(res_text)
+                turn_outcomes.append(outcome)
+                if outcome is not None:
+                    terminal_texts.append(res_text)
 
                 lowered_res = res_text.lower()
                 is_missing_path = "does not exist" in lowered_res
@@ -656,7 +1117,7 @@ async def run_agent_loop(
                     classified = classify_tool_result(name, res_text, args, meta)
                     if classified.category == ErrorCategory.INSPECTION_NOTICE:
                         task_state.add_inspection_notice(f"{name}: {classified.message}")
-                        if not is_repeat:
+                        if not is_repeat and outcome is None:
                             turn_useful = True
                     elif classified.category == ErrorCategory.EXECUTION_ERROR:
                         turn_has_exec_error = True
@@ -664,12 +1125,17 @@ async def run_agent_loop(
                     elif classified.category == ErrorCategory.TASK_DEFECT:
                         task_state.add_defect(f"{name}: {classified.message}")
                 else:
-                    if not meta.get("error") and not is_repeat:
+                    if not meta.get("error") and not is_repeat and already is None and not stalled_poll and outcome is None:
                         turn_useful = True
+                        has_prior_useful_results = True
 
-                # Track file inspection ranges for successful reads
-                if name == "read_file" and not meta.get("error") and not is_missing_path:
+                # Track file inspection ranges or invalidate on file mutation
+                if name == "read_file" and not meta.get("error") and not is_missing_path and already is None:
                     _track_read_file(res_text, args.get("path", ""), inspection_tracker)
+                elif name in {"write_file", "edit_file"} and not meta.get("error") and not meta.get("blocked"):
+                    mut_path = (args.get("path", "") or "").replace("\\", "/").strip()
+                    if mut_path:
+                        inspection_tracker.files.pop(mut_path, None)
 
             # Update controller
             controller.tick(
@@ -688,6 +1154,33 @@ async def run_agent_loop(
 
             empty_reply_count = 0
 
+            # If a user steer arrived while tools were executing, redirect immediately before any early exit
+            pending_steers = await _drain_pending_steers(steer_queue, get_pending_steer, memory)
+            if pending_steers:
+                await _apply_steers(pending_steers)
+                continue
+
+            # Authoritative fast exits on clean blocking or terminal tool outcomes
+            if turn_outcomes and all(o is not None for o in turn_outcomes):
+                if all(o == "security_blocked" for o in turn_outcomes):
+                    return terminal_texts[-1]
+                if all(o == "ro_blocked" for o in turn_outcomes):
+                    ro_blocked_turns += 1
+                    is_compound_read_research = bool(
+                        scope.jarvis
+                        and any(w in scope.prompt_lower for w in ("read", "research", "explain", "summarize", "inside"))
+                    )
+                    if ro_blocked_turns >= 2 or not is_compound_read_research:
+                        return terminal_texts[-1]
+                if all(o == "not_found" for o in turn_outcomes):
+                    not_found_turns += 1
+                    is_compound_search = bool(scope.jarvis or scope.backend or scope.frontend)
+                    if not_found_turns >= 2 or (not has_prior_useful_results and not is_compound_search):
+                        return terminal_texts[-1]
+            else:
+                ro_blocked_turns = 0
+                not_found_turns = 0
+
             # If tool calls fail repeatedly (e.g. non-existent files/directories),
             # stop early and provide an actionable explanation rather than exhausting max steps
             if consecutive_failed_turns >= 3:
@@ -700,14 +1193,19 @@ async def run_agent_loop(
                     f"To inspect an external project or change directory, use the command: /workspace <path>"
                 )
 
-            # If the model is stuck repeating tool calls it already has answers for,
+            # If the model is stuck repeating tool calls or identical OCR/snapshot polls,
             # break the loop by forcing a final answer synthesis without tools
-            if consecutive_duplicate_turns >= settings.agent.max_duplicate_only_turns:
-                logger.info("Duplicate tool calls threshold reached (%d); forcing synthesis.", consecutive_duplicate_turns)
+            max_poll_stalls = max(poll_stall_counts.values(), default=0)
+            if consecutive_duplicate_turns >= settings.agent.max_duplicate_only_turns or max_poll_stalls >= 2:
+                logger.info("Duplicate/stall threshold reached (dups=%d, poll_stalls=%d); forcing synthesis.", consecutive_duplicate_turns, max_poll_stalls)
                 try:
                     synthesis_resp = await provider.chat(messages, tools=None)
                     synth_content = (synthesis_resp.message.content or "").strip()
                     if synth_content:
+                        pending_steers = await _drain_pending_steers(steer_queue, get_pending_steer, memory)
+                        if pending_steers:
+                            await _apply_steers(pending_steers, synth_content, append_assistant=True)
+                            continue
                         return synth_content
                 except Exception as e:
                     logger.warning("Forced synthesis on duplicate turn failed: %s", e)
@@ -753,12 +1251,23 @@ async def run_agent_loop(
                             })
                             continue
 
+                pending_steers = await _drain_pending_steers(steer_queue, get_pending_steer, memory)
+                if pending_steers:
+                    await _apply_steers(pending_steers, answer, append_assistant=False)
+                    continue
                 return answer
 
             # Empty response handling with bounded nudging
             empty_reply_count += 1
             if empty_reply_count > max_empty_replies:
-                return await _force_answer_from_evidence(messages, provider, scope)
+                if scope.conversational and not [m for m in messages if m.get("role") == "tool"]:
+                    return f"Online and ready—currently running on {model_label} inside AURA V4. How can I help?"
+                forced = await _force_answer_from_evidence(messages, provider, scope)
+                pending_steers = await _drain_pending_steers(steer_queue, get_pending_steer, memory)
+                if pending_steers:
+                    await _apply_steers(pending_steers, forced, append_assistant=True)
+                    continue
+                return forced
 
             tool_results = [m for m in messages if m.get("role") == "tool"]
             if tool_results:
@@ -803,8 +1312,9 @@ async def _force_answer_from_evidence(
 
     evidence = []
     for m in tool_results:
-        content_preview = m.get("content", "")[:1000]
         tool_name = m.get("name", "tool")
+        limit = 1800 if tool_name in {"run_tests", "get_file_diff", "git_diff"} else 1200
+        content_preview = m.get("content", "")[:limit]
         evidence.append(f"[{tool_name}] {content_preview}")
 
     evidence_text = "\n---\n".join(evidence)
@@ -845,11 +1355,16 @@ def _track_read_file(result_text: str, path: str, tracker: InspectionTracker) ->
     """Parse read_file output to track inspection ranges."""
     if not path or not result_text:
         return
-    # Format: "Showing lines X-Y of Z\n..."
-    import re
-    m = re.search(r"Showing lines (\d+)-(\d+) of (\d+)", result_text)
+    # Matches both "Showing lines X-Y of Z" and "[Lines X to Y of Z in ...]"
+    m = re.search(
+        r"(?:Showing lines (\d+)-(\d+) of (\d+)|\[Lines (\d+) to (\d+) of (\d+)\b)",
+        result_text,
+    )
     if m:
-        tracker.record(path, int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        s = m.group(1) or m.group(4)
+        e = m.group(2) or m.group(5)
+        t = m.group(3) or m.group(6)
+        tracker.record(path, int(s), int(e), int(t))
     else:
         # Heuristic: count newlines as a rough line count
         lines = result_text.count("\n") + 1

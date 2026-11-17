@@ -65,5 +65,11 @@ class ResultCache:
         for k in to_del:
             self._store.pop(k, None)
 
+    def invalidate_mutation(self) -> None:
+        """Clear cached directory/search/diff/git read views after a file write or edit."""
+        stale_tools = {"list_directory", "search_files", "get_file_diff", "file_outline", "git_status", "git_diff", "git_ls_files"}
+        for key in [k for k in self._store if k[0] in stale_tools]:
+            self._store.pop(key, None)
+
     def clear(self) -> None:
         self._store.clear()

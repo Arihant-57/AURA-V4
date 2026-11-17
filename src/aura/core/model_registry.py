@@ -80,6 +80,12 @@ class ModelRegistry:
     def refresh(self) -> None:
         """Query Ollama for installed models and their capabilities."""
         self.models.clear()
+        if not os.environ.get("PYTEST_CURRENT_TEST"):
+            try:
+                from .providers import ensure_ollama_running
+                ensure_ollama_running(timeout=6.0)
+            except Exception:
+                pass
         try:
             import ollama as _ollama
         except ImportError:

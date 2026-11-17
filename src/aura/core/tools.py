@@ -44,7 +44,10 @@ def check_path_policy(name: str, arguments: dict, scope: TaskScope) -> Optional[
     Deterministic guardrail applied before any MCP call. Returns a blocking
     message or None.
     """
-    if name not in {"read_file", "write_file", "edit_file", "list_directory", "search_files", "get_file_diff"}:
+    if name not in {
+        "read_file", "write_file", "edit_file", "list_directory",
+        "search_files", "get_file_diff", "file_outline", "scan_repository",
+    }:
         return None
 
     path_arg = arguments.get("path", "")
@@ -137,6 +140,8 @@ def sanitize_tool_result(
     elif name == "read_file":
         # Filesystem server limits files to 10,000 characters
         limit = 10000
+    elif name == "desktop_inspect_path":
+        limit = 6000
     elif name == "run_tests":
         limit = 4000
     elif name == "get_file_diff":
@@ -183,6 +188,13 @@ def sanitize_tool_result(
             filtered_lines.append(line)
         text = "\n".join(filtered_lines)
 
+    if name in {
+        "desktop_read_screen_ocr", "desktop_inspect_cursor", "browser_snapshot",
+        "jarvis_fetch_url", "jarvis_research", "jarvis_web_search",
+    }:
+        lines = [ln.rstrip() for ln in text.splitlines()]
+        text = re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
+
     if len(text) <= limit:
         return text
 
@@ -196,14 +208,85 @@ def sanitize_tool_result(
 # Schema Conversion & Validation
 # ---------------------------------------------------------------------------
 
+_DOC_SECTION_SPLIT_RE = re.compile(
+    r"\n\s*(?:Args|Arguments|Parameters|Returns|Yields|Raises|Examples?|Notes?)\s*:",
+    re.IGNORECASE,
+)
+_STRIP_SCHEMA_KEYS = frozenset({"title", "$schema", "additionalProperties", "examples"})
+
+
+def _compact_description(description: Any, max_chars: int = 180) -> str:
+    """Trim docstring boilerplate and extra whitespace while preserving actionable semantics."""
+    if not isinstance(description, str) or not description:
+        return ""
+    head = _DOC_SECTION_SPLIT_RE.split(description, maxsplit=1)[0]
+    compact = re.sub(r"\s+", " ", head).strip()
+    if len(compact) <= max_chars:
+        return compact
+    clipped = compact[: max_chars - 3].rsplit(" ", 1)[0].rstrip(",;:-")
+    if not clipped:
+        clipped = compact[: max_chars - 3]
+    return f"{clipped}..."
+
+
+def _compact_schema(node: Any, *, is_property: bool = False) -> Any:
+    """Return a compacted copy of a JSON schema without redundant metadata keys."""
+    if isinstance(node, list):
+        return [_compact_schema(item) for item in node]
+    if not isinstance(node, dict):
+        return node
+
+    out: dict[str, Any] = {}
+    for k, v in node.items():
+        if k in _STRIP_SCHEMA_KEYS:
+            continue
+        if k == "default" and v is None:
+            continue
+        if k == "type" and isinstance(v, list):
+            non_null_types = [t for t in v if t != "null"]
+            out[k] = non_null_types[0] if len(non_null_types) == 1 else v
+            continue
+        if k == "description" and isinstance(v, str):
+            comp = _compact_description(v, max_chars=80 if is_property else 160)
+            if comp:
+                out[k] = comp
+            continue
+        if k == "properties" and isinstance(v, dict):
+            out[k] = {
+                pname: _compact_schema(pspec, is_property=True)
+                for pname, pspec in v.items()
+            }
+            continue
+        if k == "items":
+            out[k] = _compact_schema(v)
+            continue
+        if k == "anyOf" and isinstance(v, list):
+            non_null = [
+                _compact_schema(opt)
+                for opt in v
+                if not (isinstance(opt, dict) and opt.get("type") == "null" and len(opt) == 1)
+            ]
+            if len(non_null) == 1 and isinstance(non_null[0], dict):
+                for sub_k, sub_v in non_null[0].items():
+                    out.setdefault(sub_k, sub_v)
+                continue
+            out[k] = non_null
+            continue
+        out[k] = _compact_schema(v) if isinstance(v, (dict, list)) else v
+    return out
+
+
 def mcp_tool_to_ollama(tool: Any, scope: TaskScope | None = None) -> dict:
-    """Convert MCP tool schema to Ollama/OpenAI function calling format."""
-    schema = (
+    """Convert MCP tool schema to lean Ollama/OpenAI function calling format."""
+    raw_schema = (
         getattr(tool, "inputSchema", None)
         or getattr(tool, "input_schema", None)
         or {"type": "object", "properties": {}}
     )
-    description = tool.description or ""
+    schema = _compact_schema(raw_schema)
+    if not isinstance(schema, dict) or not schema.get("type"):
+        schema = {"type": "object", "properties": {}}
+    description = _compact_description(getattr(tool, "description", None) or "", max_chars=180)
     if scope and scope.backend and not scope.frontend:
         if tool.name == "list_directory":
             description += (
@@ -332,11 +415,49 @@ def normalize_tool_arguments(name: str, arguments: dict) -> dict:
                 norm["test_path"] = norm.pop(alias)
                 break
 
-    # Search query aliases
-    if name == "search_files" and "query" not in norm:
-        for alias in ("pattern", "term", "text", "search"):
+    # Search query & filter aliases
+    if name == "search_files":
+        if "query" not in norm:
+            for alias in ("pattern", "term", "text", "search"):
+                if alias in norm and isinstance(norm[alias], str):
+                    norm["query"] = norm.pop(alias)
+                    break
+        if "file_glob" not in norm and isinstance(norm.get("glob"), str):
+            norm["file_glob"] = norm.pop("glob")
+        if "use_regex" not in norm and isinstance(norm.get("regex"), bool):
+            norm["use_regex"] = norm.pop("regex")
+
+    if name == "scan_repository":
+        if "path" not in norm:
+            for alias in ("root", "repo", "folder"):
+                if alias in norm and isinstance(norm[alias], str):
+                    norm["path"] = norm.pop(alias)
+                    break
+        if not norm.get("path"):
+            norm["path"] = "."
+
+    if name == "jarvis_open_website" and "target" not in norm:
+        for alias in ("url", "site", "website", "domain"):
+            if alias in norm and isinstance(norm[alias], str):
+                norm["target"] = norm.pop(alias)
+                break
+
+    if name in {"jarvis_web_search", "desktop_find_files"} and "query" not in norm:
+        for alias in ("q", "topic", "term", "search", "keywords", "pattern"):
             if alias in norm and isinstance(norm[alias], str):
                 norm["query"] = norm.pop(alias)
+                break
+
+    if name == "jarvis_research" and "topic" not in norm:
+        for alias in ("query", "q", "subject", "term", "search"):
+            if alias in norm and isinstance(norm[alias], str):
+                norm["topic"] = norm.pop(alias)
+                break
+
+    if name in {"desktop_open_path", "desktop_inspect_path"} and "target" not in norm:
+        for alias in ("path", "name", "folder"):
+            if alias in norm and isinstance(norm[alias], str):
+                norm["target"] = norm.pop(alias)
                 break
 
     return norm

@@ -153,7 +153,7 @@ def classify_tool_result(
     )
 
     if is_missing_target:
-        if tool_name in {"read_file", "list_directory", "search_files"}:
+        if tool_name in {"read_file", "list_directory", "search_files", "scan_repository"}:
             clean_msg = result_text.replace("ERROR:", "").strip()
             return ClassifiedResult(
                 category=ErrorCategory.INSPECTION_NOTICE,

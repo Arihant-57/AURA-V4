@@ -19,6 +19,7 @@ from src.aura.core.model_router import (
     classify_task_role,
 )
 from src.aura.core.model_registry import ModelRegistry, ModelCapability, ModelRole
+from src.aura.core.memory import SessionMemory
 from src.aura.core.scope import TaskScope
 
 
@@ -554,4 +555,82 @@ class TestFormatTaskMetricsDefect:
                 )
                 assert answer == "report"
                 assert mock_rms.called
+
+    def test_json_handoff_parsing_and_routing_strip(self):
+        from src.aura.agents.aura_v4 import _run_task
+
+        state = TaskState(original_request="fix auth")
+        analysis_json = (
+            "Inspected files.\n```json\n"
+            '{"findings": ["missing rate limit"], "files": ["src/api.py"], '
+            '"changes": ["add limiter"], "tests": ["tests/test_api.py"], "remaining": ["verify edge"]}\n'
+            "```"
+        )
+        _extract_findings(analysis_json, state)
+        assert state.findings == ["missing rate limit"]
+        assert state.inspected_files["src/api.py"] == "identified"
+        assert state.proposed_changes == ["add limiter"]
+        assert state.remaining_work == ["verify edge"]
+
+        coding_json = '```json\n{"implemented": ["added limiter"], "modified_files": ["src/api.py"], "needs_testing": []}\n```'
+        _extract_implementation(coding_json, state)
+        assert "added limiter" in state.completed_work
+        assert state.inspected_files["src/api.py"] == "modified"
+
+        verify_fail_json = '```json\n{"verdict": "fail", "details": ["checked"], "defects": ["429 missing"]}\n```'
+        assert _verdict_is_fail(verify_fail_json) is True
+        assert _extract_defects(verify_fail_json) == ["429 missing"]
+
+        # Numbered fallback should also parse cleanly when model skips JSON
+        state2 = TaskState()
+        _extract_findings("FINDINGS:\n1. race in worker\nFILES:\n1. worker.py", state2)
+        assert state2.findings == ["race in worker"]
+        assert state2.inspected_files["worker.py"] == "identified"
+
+    @pytest.mark.asyncio
+    async def test_memory_prefix_does_not_misroute_simple_snippet(self):
+        from src.aura.agents.aura_v4 import _run_task
+
+        mock_router = _make_router("qwen3.5:4b", "qwen2.5-coder:7b")
+        mock_provider = MagicMock()
+        mock_provider.model = "qwen3.5:4b"
+        mock_hub = MagicMock(workspace="/workspace", read_only=True)
+        mock_memory = SessionMemory()
+        mock_cache = MagicMock()
+
+        prompt_with_ws_mem = (
+            "[Workspace Memory (persisted on SSD across chats)]\n"
+            "- Key files: src/auth.py, server.js\n\n"
+            "[Current Request]\n"
+            "Write a 3-line Python function to add two numbers and output only a code block."
+        )
+        with patch("src.aura.agents.aura_v4.run_multi_stage", AsyncMock()) as mock_rms:
+            with patch("src.aura.agents.aura_v4.run_agent_loop", AsyncMock(return_value="```python\ndef add(a, b): return a + b\n```")) as mock_loop:
+                ans, _ = await _run_task(
+                    prompt_with_ws_mem, mock_router, mock_provider, mock_hub, mock_memory, mock_cache, None
+                )
+        assert "def add" in ans
+        assert not mock_rms.called
+        assert mock_loop.called
+
+    @pytest.mark.asyncio
+    async def test_multi_stage_emits_stage_events(self):
+        router = _make_router("qwen3.5:4b", "qwen2.5-coder:7b")
+        hub = MagicMock(workspace="/project", read_only=True, tools={}, tool_clients={}, tool_schemas={})
+        memory = MagicMock(files={}, dirs={}, modified=set())
+        memory.render = MagicMock(return_value="")
+        cache = MagicMock()
+        events = []
+
+        async def mock_loop(task, provider, hub, memory, cache, **kwargs):
+            return '```json\n{"verdict": "PASS", "details": ["ok"], "defects": []}\n```'
+
+        with patch("src.aura.core.orchestrator.run_agent_loop", side_effect=mock_loop):
+            await run_multi_stage(
+                "audit authentication and configuration logic across backend files",
+                router, hub, memory, cache,
+                on_event=events.append,
+            )
+        stages = [e["stage"] for e in events if e.get("event") == "stage"]
+        assert stages == ["analysis", "coding_skipped", "verification"]
 
