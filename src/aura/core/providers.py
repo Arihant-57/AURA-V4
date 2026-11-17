@@ -738,13 +738,14 @@ class CloudProvider:
             )
             strict_cloud = os.environ.get("AURA_CLOUD_STRICT", "").strip().lower() in ("1", "true", "yes")
             if _is_freellmapi_url(base_url):
-                fb_cap = 55.0
+                fb_cap = 15.0
             elif has_fallback:
-                fb_cap = 10.0
+                fb_cap = 7.5
             else:
-                fb_cap = float(self.timeout) if strict_cloud else 18.0
+                fb_cap = float(self.timeout) if strict_cloud else 14.0
+            eff_timeout = min(float(self.timeout), fb_cap)
             req_timeout: Any = (
-                httpx.Timeout(min(float(self.timeout), fb_cap), connect=5.0)
+                httpx.Timeout(eff_timeout, connect=5.0)
                 if (has_fallback or not strict_cloud)
                 else self.timeout
             )
@@ -756,7 +757,7 @@ class CloudProvider:
                         payload.pop("reasoning_effort", None)
                         resp = await client.post(url, json=payload, headers=headers)
             except httpx.TimeoutException as exc:
-                last_exc = TimeoutError(f"Cloud API request timed out after {self.timeout}s: {exc}")
+                last_exc = TimeoutError(f"Cloud API request timed out after {eff_timeout:.1f}s: {exc}")
                 _mark_cooldown(preset, api_model)
                 _maybe_inject_gemini_fallback()
                 if idx + 1 < len(candidates):
@@ -770,7 +771,7 @@ class CloudProvider:
             except (httpx.ConnectError, httpx.NetworkError) as exc:
                 if _is_freellmapi_url(base_url) and await asyncio.to_thread(ensure_freellmapi_running, base_url, 8.0):
                     try:
-                        async with httpx.AsyncClient(timeout=self.timeout) as client:
+                        async with httpx.AsyncClient(timeout=req_timeout) as client:
                             resp = await client.post(url, json=payload, headers=headers)
                     except Exception:
                         resp = None

@@ -319,9 +319,17 @@ async def test_11_session_usable_after_recoverable_failure(mock_hub, fast_settin
 @pytest.mark.asyncio
 async def test_12_recovers_immediately_from_ollama_xml_tool_template_500(mock_hub, fast_settings):
     """Scenario 12: XML <function></parameter> 500 retries immediately with native tools disabled."""
+    from types import SimpleNamespace
+
     memory = SessionMemory()
     cache = ResultCache(ttl_seconds=300)
-    mock_hub.tools = {"read_file": MockMCPTool("read_file")}
+    mock_hub.tools = {
+        "read_file": SimpleNamespace(
+            name="read_file",
+            description="Read file",
+            input_schema={"type": "object", "properties": {"path": {"type": "string"}}},
+        )
+    }
 
     provider = MagicMock(spec=OllamaProvider)
     seen_tools_args: list[object] = []

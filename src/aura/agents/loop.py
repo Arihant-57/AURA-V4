@@ -962,7 +962,7 @@ async def run_agent_loop(
                         for m in messages_to_send
                     ):
                         sigs = "; ".join(
-                            f"{t.name}({', '.join((t.inputSchema or {}).get('properties', {}).keys())})"
+                            f"{t.name}({', '.join(((getattr(t, 'input_schema', None) or getattr(t, 'inputSchema', None) or {}).get('properties', {})).keys())})"
                             for t in active_tools[:24]
                         )
                         messages_to_send = [
