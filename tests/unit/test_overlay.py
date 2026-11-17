@@ -439,3 +439,39 @@ def test_overlay_model_choices_clean_without_unconfigured_cloud():
     assert "Claude · API" not in labels
     assert "Gemini 2.5 · API" not in labels
 
+
+def test_overlay_header_no_clipping_and_apps_catalog_panel():
+    import subprocess
+    import sys
+
+    script = (
+        "import tkinter as tk\n"
+        "from unittest.mock import patch\n"
+        "from src.aura.overlay import DynamicIslandPill\n"
+        "with patch.object(DynamicIslandPill, '_refresh_status_async', lambda self: None), \\\n"
+        "     patch.object(DynamicIslandPill, '_start_hotkey_listener', lambda self: None):\n"
+        "    try:\n"
+        "        pill = DynamicIslandPill('http://127.0.0.1:8000')\n"
+        "    except tk.TclError:\n"
+        "        raise SystemExit(0)\n"
+        "    pill.root.attributes('-alpha', 0.0)\n"
+        "    pill.expand()\n"
+        "    pill.root.update()\n"
+        "    hdr_right_edge = pill.header.winfo_rootx() + pill.header.winfo_width()\n"
+        "    for btn in (pill.shutter_btn, pill.apps_btn, pill.shutdown_btn):\n"
+        "        assert btn.winfo_rootx() + btn.winfo_width() <= hdr_right_edge + 1\n"
+        "        assert btn.winfo_width() >= 20\n"
+        "    pill._open_apps_popover()\n"
+        "    pill.root.update()\n"
+        "    assert pill._apps_popover_visible is True\n"
+        "    assert pill.apps_popover.winfo_width() >= 700\n"
+        "    pill._apps_filter_var.set('chrome')\n"
+        "    pill._filter_apps_cards()\n"
+        "    assert len(pill._apps_cards) == 4\n"
+        "    pill._close_apps_popover()\n"
+        "    pill.shutdown_app()\n"
+    )
+    proc = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=15)
+    assert proc.returncode == 0, proc.stderr or proc.stdout
+
+

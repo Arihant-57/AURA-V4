@@ -1144,7 +1144,7 @@ class DynamicIslandPill:
         self.orb_core = self.orb_canvas.create_oval(23, 23, 31, 31, fill=_PALETTE["accent"], outline="")
 
         # Expanded-only divider + prominent Model Selector pill button
-        self.exp_div1 = tk.Frame(self.header, width=1, height=34, bg="#394456")
+        self.exp_div1 = tk.Frame(self.header, width=1, height=30, bg="#394456")
         self.model_btn = self._mk_btn(
             self.header,
             f"◈ {self.active_model_name} ▾",
@@ -1153,11 +1153,11 @@ class DynamicIslandPill:
             fg=_PALETTE["arc_text"],
             hover_bg=_PALETTE["pill_active_bg"],
             hover_fg="#FFFFFF",
-            padx=7,
-            pady=3,
+            padx=5,
+            pady=2,
             border_color=_PALETTE["arc_border"],
         )
-        self.exp_div2 = tk.Frame(self.header, width=1, height=34, bg="#394456")
+        self.exp_div2 = tk.Frame(self.header, width=1, height=30, bg="#394456")
 
         # Expanded-only Sequential & Sub-Agent Pills bar (@auto @planner @coder @researcher @gmail @calendar)
         self.hdr_agents_frame = tk.Frame(self.header, bg=_PALETTE["hdr_bar"])
@@ -1174,19 +1174,19 @@ class DynamicIslandPill:
                 bd=0,
                 highlightthickness=1,
                 highlightbackground="#5A667A",
-                font=(_MONO_FONT, 8, "bold"),
-                padx=4,
+                font=(_MONO_FONT, 7, "bold"),
+                padx=3,
                 pady=2,
                 cursor="hand2",
             )
             pbtn.pack(side="left", padx=1)
             self._agent_header_pills[pill_lbl] = pbtn
 
-        self.exp_div3 = tk.Frame(self.header, width=1, height=34, bg="#394456")
+        self.exp_div3 = tk.Frame(self.header, width=1, height=30, bg="#394456")
 
         # Unified Right Header Cluster packed BEFORE expanding middle wave_stack so it is never squeezed at high DPI
         self.hdr_right = tk.Frame(self.header, bg=_PALETTE["gunmetal"])
-        self.hdr_right.pack(side="right", padx=(4, 10))
+        self.hdr_right.pack(side="right", padx=(2, 6))
 
         # Pack Shutdown button FIRST on the right edge so it always renders visibly in Compact & Expanded states
         self.shutdown_btn = self._mk_btn(
@@ -1197,11 +1197,11 @@ class DynamicIslandPill:
             fg=_PALETTE["danger_fg"],
             hover_bg=_PALETTE["danger_hover"],
             hover_fg="#FFFFFF",
-            padx=8,
-            pady=3,
+            padx=6,
+            pady=2,
             border_color="#E11D48",
         )
-        self.shutdown_btn.pack(side="right", padx=(4, 0))
+        self.shutdown_btn.pack(side="right", padx=(3, 0))
 
         self.compact_voice_btn = self._mk_btn(
             self.hdr_right,
@@ -1211,16 +1211,16 @@ class DynamicIslandPill:
             fg=_PALETTE["steel"],
             hover_bg=_PALETTE["titanium"],
             hover_fg=_PALETTE["accent"],
-            padx=7,
+            padx=6,
             pady=2,
             border_color="#485364",
         )
-        self.compact_voice_btn.pack(side="left", padx=(0, 5))
+        self.compact_voice_btn.pack(side="left", padx=(0, 4))
 
         self.mic_lbl_hdr = tk.Label(
-            self.hdr_right, text="Mic", bg=_PALETTE["gunmetal"], fg="#DCE4EE", font=(_UI_FONT, 9, "bold")
+            self.hdr_right, text="Mic", bg=_PALETTE["gunmetal"], fg="#DCE4EE", font=(_UI_FONT, 8, "bold")
         )
-        self.mic_lbl_hdr.pack(side="left", padx=(0, 4))
+        self.mic_lbl_hdr.pack(side="left", padx=(0, 3))
 
         # Preserve attribute name pill.capsule_mic_btn (Canvas toggle switch)
         self.capsule_mic_btn = tk.Canvas(
@@ -1261,8 +1261,8 @@ class DynamicIslandPill:
             fg=_PALETTE["arc_text"],
             hover_bg=_PALETTE["pill_active_bg"],
             hover_fg="#FFFFFF",
-            padx=8,
-            pady=3,
+            padx=6,
+            pady=2,
             border_color=_PALETTE["arc_border"],
         )
 
@@ -1274,8 +1274,8 @@ class DynamicIslandPill:
             fg="#DCE4EE",
             hover_bg=_PALETTE["titanium"],
             hover_fg=_PALETTE["accent"],
-            padx=8,
-            pady=3,
+            padx=6,
+            pady=2,
             border_color="#7A899D",
         )
 
@@ -1516,33 +1516,112 @@ class DynamicIslandPill:
     def _build_apps_popover(self) -> None:
         self.apps_popover = tk.Frame(
             self.root,
-            bg=_PALETTE["panel_mid"],
+            bg=_PALETTE["bg"],
             highlightbackground=_PALETTE["arc_border"],
             highlightthickness=1,
             padx=12,
             pady=10,
         )
-        hdr = tk.Frame(self.apps_popover, bg=_PALETTE["panel_mid"])
-        hdr.pack(fill="x", pady=(0, 6))
+        hdr = tk.Frame(self.apps_popover, bg=_PALETTE["bg"])
+        hdr.pack(fill="x", pady=(0, 8))
+
+        title_col = tk.Frame(hdr, bg=_PALETTE["bg"])
+        title_col.pack(side="left")
         tk.Label(
-            hdr,
-            text="CONNECT APPS",
-            bg=_PALETTE["panel_mid"],
+            title_col,
+            text="APPS & CONNECTORS",
+            bg=_PALETTE["bg"],
             fg=_PALETTE["arc_text"],
-            font=(_TECH_FONT, 9, "bold"),
-        ).pack(side="left")
+            font=(_TECH_FONT, 10, "bold"),
+        ).pack(anchor="w")
+        tk.Label(
+            title_col,
+            text="Manage Workspace integrations, Cloud providers & active MCP plugins",
+            bg=_PALETTE["bg"],
+            fg=_PALETTE["muted"],
+            font=(_UI_FONT, 8),
+        ).pack(anchor="w")
+
+        hdr_right = tk.Frame(hdr, bg=_PALETTE["bg"])
+        hdr_right.pack(side="right")
+        self._apps_filter_var = tk.StringVar(value="")
+        self._apps_cat_filter = "all"
+        self._apps_search_entry = tk.Entry(
+            hdr_right,
+            textvariable=self._apps_filter_var,
+            bg=_PALETTE["well"],
+            fg=_PALETTE["text"],
+            insertbackground=_PALETTE["accent"],
+            relief="flat",
+            highlightthickness=1,
+            highlightbackground="#485364",
+            width=22,
+            font=(_UI_FONT, 9),
+        )
+        self._apps_search_entry.insert(0, "Search apps & plugins...")
+        self._apps_search_entry.configure(fg=_PALETTE["muted"])
+        self._apps_search_entry.bind(
+            "<FocusIn>",
+            lambda _e: (
+                self._apps_search_entry.delete(0, "end"),
+                self._apps_search_entry.configure(fg=_PALETTE["text"]),
+            )
+            if self._apps_search_entry.get() == "Search apps & plugins..."
+            else None,
+        )
+        self._apps_search_entry.bind("<KeyRelease>", lambda _e: self._filter_apps_cards())
+        self._apps_search_entry.pack(side="left", padx=(0, 8), ipady=3)
+
+        self._apps_cat_btns: dict[str, tk.Button] = {}
+        for c_key, c_lbl in (("all", "All"), ("connected", "Connected"), ("mcp", "MCP")):
+            cbtn = self._mk_btn(
+                hdr_right,
+                c_lbl,
+                lambda k=c_key: self._set_apps_cat_filter(k),
+                bg=_PALETTE["pill_active_bg"] if c_key == "all" else _PALETTE["well"],
+                fg="#FFFFFF" if c_key == "all" else _PALETTE["steel"],
+                padx=8,
+                pady=2,
+                border_color=_PALETTE["arc_border"] if c_key == "all" else "#485364",
+            )
+            cbtn.pack(side="left", padx=(0, 4))
+            self._apps_cat_btns[c_key] = cbtn
+
         self._mk_btn(
-            hdr, "×", self._close_apps_popover, bg=_PALETTE["panel_mid"], fg=_PALETTE["muted"], padx=6, pady=0, border_color=_PALETTE["panel_mid"]
-        ).pack(side="right")
+            hdr_right,
+            "✕ Close",
+            self._close_apps_popover,
+            bg=_PALETTE["card"],
+            fg=_PALETTE["text"],
+            padx=8,
+            pady=2,
+            border_color="#5A667A",
+        ).pack(side="left", padx=(6, 0))
+
+        self._apps_grid = tk.Frame(self.apps_popover, bg=_PALETTE["bg"])
+        self._apps_grid.pack(fill="both", expand=True)
+        self._apps_grid.columnconfigure(0, weight=1, uniform="appcol")
+        self._apps_grid.columnconfigure(1, weight=1, uniform="appcol")
 
         self.apps_gmail_var = tk.BooleanVar(value=True)
         self.apps_cal_var = tk.BooleanVar(value=True)
+        self._apps_cards: list[tuple[tk.Frame, str, str, int, int, int]] = []
 
-        g_hdr = tk.Frame(self.apps_popover, bg=_PALETTE["panel_mid"])
-        g_hdr.pack(fill="x", pady=(2, 2))
+        # --- Card 1: Gmail Connector ---
+        gmail_card = tk.Frame(
+            self._apps_grid,
+            bg=_PALETTE["panel_mid"],
+            highlightbackground="#556173",
+            highlightthickness=1,
+            padx=12,
+            pady=10,
+        )
+        gmail_card.grid(row=0, column=0, sticky="nsew", padx=(0, 6), pady=(0, 8))
+        g_hdr = tk.Frame(gmail_card, bg=_PALETTE["panel_mid"])
+        g_hdr.pack(fill="x", pady=(0, 4))
         tk.Checkbutton(
             g_hdr,
-            text="Gmail",
+            text="✉  Gmail",
             variable=self.apps_gmail_var,
             command=lambda: self._toggle_app_flag("gmail"),
             bg=_PALETTE["panel_mid"],
@@ -1550,30 +1629,62 @@ class DynamicIslandPill:
             activebackground=_PALETTE["panel_mid"],
             selectcolor=_PALETTE["cta_bg"],
             highlightthickness=0,
-            font=(_UI_FONT, 9, "bold"),
+            font=(_UI_FONT, 10, "bold"),
         ).pack(side="left")
         self.apps_gmail_state_lbl = tk.Label(
-            g_hdr, text="Off", bg=_PALETTE["panel_mid"], fg=_PALETTE["muted"], font=(_UI_FONT, 8)
+            g_hdr,
+            text="Off",
+            bg=_PALETTE["well"],
+            fg=_PALETTE["muted"],
+            font=(_MONO_FONT, 8, "bold"),
+            padx=6,
+            pady=1,
         )
         self.apps_gmail_state_lbl.pack(side="right")
+        tk.Label(
+            gmail_card,
+            text="Read unread mail, search threads & compose replies via IMAP/SMTP.",
+            bg=_PALETTE["panel_mid"],
+            fg=_PALETTE["muted"],
+            font=(_UI_FONT, 8),
+            anchor="w",
+        ).pack(fill="x", pady=(0, 6))
 
+        tk.Label(
+            gmail_card, text="Gmail Address", bg=_PALETTE["panel_mid"], fg=_PALETTE["steel"], font=(_UI_FONT, 8, "bold"), anchor="w"
+        ).pack(fill="x")
         self.apps_gmail_addr_entry = tk.Entry(
-            self.apps_popover, bg=_PALETTE["well"], fg=_PALETTE["text"], insertbackground=_PALETTE["accent"], relief="flat", width=30, font=(_UI_FONT, 9)
+            gmail_card, bg=_PALETTE["well"], fg=_PALETTE["text"], insertbackground=_PALETTE["accent"],
+            relief="flat", highlightthickness=1, highlightbackground="#485364", font=(_UI_FONT, 9),
         )
         self.apps_gmail_addr_entry.insert(0, "you@gmail.com")
         self.apps_gmail_addr_entry.bind("<FocusIn>", lambda _e: self._clear_hint_entry(self.apps_gmail_addr_entry, "you@gmail.com"))
-        self.apps_gmail_addr_entry.pack(fill="x", pady=(0, 3), ipady=2)
+        self.apps_gmail_addr_entry.pack(fill="x", pady=(2, 6), ipady=3)
 
+        tk.Label(
+            gmail_card, text="Google App Password", bg=_PALETTE["panel_mid"], fg=_PALETTE["steel"], font=(_UI_FONT, 8, "bold"), anchor="w"
+        ).pack(fill="x")
         self.apps_gmail_pass_entry = tk.Entry(
-            self.apps_popover, bg=_PALETTE["well"], fg=_PALETTE["text"], insertbackground=_PALETTE["accent"], relief="flat", show="*", width=30, font=(_UI_FONT, 9)
+            gmail_card, bg=_PALETTE["well"], fg=_PALETTE["text"], insertbackground=_PALETTE["accent"],
+            relief="flat", highlightthickness=1, highlightbackground="#485364", show="*", font=(_UI_FONT, 9),
         )
-        self.apps_gmail_pass_entry.pack(fill="x", pady=(0, 6), ipady=2)
+        self.apps_gmail_pass_entry.pack(fill="x", pady=(2, 4), ipady=3)
 
-        c_hdr = tk.Frame(self.apps_popover, bg=_PALETTE["panel_mid"])
-        c_hdr.pack(fill="x", pady=(2, 2))
+        # --- Card 2: Google Calendar Connector ---
+        cal_card = tk.Frame(
+            self._apps_grid,
+            bg=_PALETTE["panel_mid"],
+            highlightbackground="#556173",
+            highlightthickness=1,
+            padx=12,
+            pady=10,
+        )
+        cal_card.grid(row=0, column=1, sticky="nsew", padx=(6, 0), pady=(0, 8))
+        c_hdr = tk.Frame(cal_card, bg=_PALETTE["panel_mid"])
+        c_hdr.pack(fill="x", pady=(0, 4))
         tk.Checkbutton(
             c_hdr,
-            text="Google Calendar",
+            text="📅  Google Calendar",
             variable=self.apps_cal_var,
             command=lambda: self._toggle_app_flag("calendar"),
             bg=_PALETTE["panel_mid"],
@@ -1581,29 +1692,43 @@ class DynamicIslandPill:
             activebackground=_PALETTE["panel_mid"],
             selectcolor=_PALETTE["cta_bg"],
             highlightthickness=0,
-            font=(_UI_FONT, 9, "bold"),
+            font=(_UI_FONT, 10, "bold"),
         ).pack(side="left")
         self.apps_cal_state_lbl = tk.Label(
-            c_hdr, text="Local", bg=_PALETTE["panel_mid"], fg=_PALETTE["muted"], font=(_UI_FONT, 8)
+            c_hdr,
+            text="Local",
+            bg=_PALETTE["well"],
+            fg=_PALETTE["muted"],
+            font=(_MONO_FONT, 8, "bold"),
+            padx=6,
+            pady=1,
         )
         self.apps_cal_state_lbl.pack(side="right")
+        tk.Label(
+            cal_card,
+            text="Sync daily briefings & agenda from private iCal (.ics) feed or local events.",
+            bg=_PALETTE["panel_mid"],
+            fg=_PALETTE["muted"],
+            font=(_UI_FONT, 8),
+            anchor="w",
+        ).pack(fill="x", pady=(0, 6))
 
+        tk.Label(
+            cal_card, text="Private iCal URL (.ics)", bg=_PALETTE["panel_mid"], fg=_PALETTE["steel"], font=(_UI_FONT, 8, "bold"), anchor="w"
+        ).pack(fill="x")
         self.apps_cal_url_entry = tk.Entry(
-            self.apps_popover, bg=_PALETTE["well"], fg=_PALETTE["text"], insertbackground=_PALETTE["accent"], relief="flat", width=30, font=(_UI_FONT, 9)
+            cal_card, bg=_PALETTE["well"], fg=_PALETTE["text"], insertbackground=_PALETTE["accent"],
+            relief="flat", highlightthickness=1, highlightbackground="#485364", font=(_UI_FONT, 9),
         )
         self.apps_cal_url_entry.insert(0, "Private iCal URL (.ics)")
         self.apps_cal_url_entry.bind("<FocusIn>", lambda _e: self._clear_hint_entry(self.apps_cal_url_entry, "Private iCal URL (.ics)"))
-        self.apps_cal_url_entry.pack(fill="x", pady=(0, 8), ipady=2)
+        self.apps_cal_url_entry.pack(fill="x", pady=(2, 8), ipady=3)
 
-        foot = tk.Frame(self.apps_popover, bg=_PALETTE["panel_mid"])
-        foot.pack(fill="x")
-        self.apps_feedback_lbl = tk.Label(
-            foot, text="", bg=_PALETTE["panel_mid"], fg=_PALETTE["accent"], font=(_UI_FONT, 8)
-        )
-        self.apps_feedback_lbl.pack(side="left")
+        cal_actions = tk.Frame(cal_card, bg=_PALETTE["panel_mid"])
+        cal_actions.pack(fill="x", pady=(4, 0))
         self._mk_btn(
-            foot,
-            "Save & Connect",
+            cal_actions,
+            "Save & Connect Apps",
             self._save_apps_config,
             bg=_PALETTE["cta_bg"],
             fg="#F2F8FF",
@@ -1612,6 +1737,146 @@ class DynamicIslandPill:
             pady=3,
             border_color=_PALETTE["arc_border"],
         ).pack(side="right")
+        self.apps_feedback_lbl = tk.Label(
+            cal_actions, text="", bg=_PALETTE["panel_mid"], fg=_PALETTE["accent"], font=(_UI_FONT, 8)
+        )
+        self.apps_feedback_lbl.pack(side="left")
+
+        # --- Card 3: Browser & Chrome MCP Plugin ---
+        browser_card = tk.Frame(
+            self._apps_grid,
+            bg=_PALETTE["panel_mid"],
+            highlightbackground="#556173",
+            highlightthickness=1,
+            padx=12,
+            pady=10,
+        )
+        browser_card.grid(row=1, column=0, sticky="nsew", padx=(0, 6))
+        bh = tk.Frame(browser_card, bg=_PALETTE["panel_mid"])
+        bh.pack(fill="x", pady=(0, 4))
+        tk.Label(
+            bh, text="🌐  Browser & Research MCP", bg=_PALETTE["panel_mid"], fg="#E8EDF4", font=(_UI_FONT, 10, "bold")
+        ).pack(side="left")
+        tk.Label(
+            bh, text="● Active · 17 tools", bg=_PALETTE["well"], fg=_PALETTE["accent"], font=(_MONO_FONT, 8, "bold"), padx=6, pady=1
+        ).pack(side="right")
+        tk.Label(
+            browser_card,
+            text="Instant Chrome/web opens, compact [e1] DOM automation & safe DuckDuckGo research.",
+            bg=_PALETTE["panel_mid"],
+            fg=_PALETTE["muted"],
+            font=(_UI_FONT, 8),
+            anchor="w",
+            wraplength=410,
+            justify="left",
+        ).pack(fill="x", pady=(0, 6))
+        self._mk_btn(
+            browser_card,
+            "Open Chrome",
+            lambda: (self._close_apps_popover(), self._run_quick("open chrome")),
+            bg=_PALETTE["well"],
+            fg=_PALETTE["text"],
+            padx=8,
+            pady=2,
+            border_color="#485364",
+        ).pack(anchor="w")
+
+        # --- Card 4: Desktop Vision & Cloud Plugins ---
+        sys_card = tk.Frame(
+            self._apps_grid,
+            bg=_PALETTE["panel_mid"],
+            highlightbackground="#556173",
+            highlightthickness=1,
+            padx=12,
+            pady=10,
+        )
+        sys_card.grid(row=1, column=1, sticky="nsew", padx=(6, 0))
+        sh = tk.Frame(sys_card, bg=_PALETTE["panel_mid"])
+        sh.pack(fill="x", pady=(0, 4))
+        tk.Label(
+            sh, text="🖥  Desktop Vision & Cloud APIs", bg=_PALETTE["panel_mid"], fg="#E8EDF4", font=(_UI_FONT, 10, "bold")
+        ).pack(side="left")
+        tk.Label(
+            sh, text="● Active · 37 MCP tools", bg=_PALETTE["well"], fg=_PALETTE["accent"], font=(_MONO_FONT, 8, "bold"), padx=6, pady=1
+        ).pack(side="right")
+        self._apps_cloud_lbl = tk.Label(
+            sys_card,
+            text="Desktop/Filesystem/Git MCP ready · Configure Cloud providers in Web UI.",
+            bg=_PALETTE["panel_mid"],
+            fg=_PALETTE["muted"],
+            font=(_UI_FONT, 8),
+            anchor="w",
+            wraplength=410,
+            justify="left",
+        )
+        self._apps_cloud_lbl.pack(fill="x", pady=(0, 6))
+        cbtns = tk.Frame(sys_card, bg=_PALETTE["panel_mid"])
+        cbtns.pack(fill="x")
+        self._mk_btn(
+            cbtns,
+            "Inspect Tools",
+            lambda: (self._close_apps_popover(), self._open_tools_popover(pinned=True)),
+            bg=_PALETTE["well"],
+            fg=_PALETTE["text"],
+            padx=8,
+            pady=2,
+            border_color="#485364",
+        ).pack(side="left", padx=(0, 6))
+        self._mk_btn(
+            cbtns,
+            "Web Settings",
+            lambda: webbrowser.open(self.bridge.base_url),
+            bg=_PALETTE["well"],
+            fg=_PALETTE["arc_text"],
+            padx=8,
+            pady=2,
+            border_color="#485364",
+        ).pack(side="left")
+
+        self._apps_cards = [
+            (gmail_card, "gmail email inbox workspace app", "workspace", 0, 0, 6),
+            (cal_card, "google calendar schedule ics workspace app", "workspace", 0, 1, 6),
+            (browser_card, "browser chrome research web mcp plugin", "mcp", 1, 0, 6),
+            (sys_card, "desktop vision files git cloud gemini freellmapi mcp", "mcp", 1, 1, 6),
+        ]
+
+    def _set_apps_cat_filter(self, cat: str) -> None:
+        self._apps_cat_filter = cat
+        for k, btn in getattr(self, "_apps_cat_btns", {}).items():
+            act = k == cat
+            btn.configure(
+                bg=_PALETTE["pill_active_bg"] if act else _PALETTE["well"],
+                fg="#FFFFFF" if act else _PALETTE["steel"],
+                highlightbackground=_PALETTE["arc_border"] if act else "#485364",
+            )
+        self._filter_apps_cards()
+
+    def _filter_apps_cards(self) -> None:
+        raw_q = (self._apps_filter_var.get() if hasattr(self, "_apps_filter_var") else "").strip().lower()
+        q = "" if raw_q == "search apps & plugins..." else raw_q
+        cat = getattr(self, "_apps_cat_filter", "all")
+        apps = self._apps_status or {}
+        g_conn = bool((apps.get("gmail") or {}).get("connected"))
+        c_conn = bool((apps.get("calendar") or {}).get("connected"))
+        for idx, (card, keywords, kind, row_i, col_i, pad) in enumerate(getattr(self, "_apps_cards", ())):
+            match_q = (not q) or (q in keywords)
+            if cat == "mcp":
+                match_cat = kind == "mcp"
+            elif cat == "connected":
+                if idx == 0:
+                    match_cat = g_conn
+                elif idx == 1:
+                    match_cat = c_conn
+                else:
+                    match_cat = True
+            else:
+                match_cat = True
+            if match_q and match_cat:
+                padx = (0, pad) if col_i == 0 else (pad, 0)
+                pady = (0, 8) if row_i == 0 else (0, 0)
+                card.grid(row=row_i, column=col_i, sticky="nsew", padx=padx, pady=pady)
+            else:
+                card.grid_remove()
 
     @staticmethod
     def _clear_hint_entry(entry: tk.Entry, hint: str) -> None:
@@ -1632,9 +1897,9 @@ class DynamicIslandPill:
             self._close_apps_popover()
             return
         self._sync_apps_popover()
+        self._filter_apps_cards()
         self._apps_popover_visible = True
-        px = max(12, self.frame.winfo_width() - 295)
-        self.apps_popover.place(in_=self.frame, x=px, y=68)
+        self.apps_popover.place(in_=self.panel_host, x=0, y=0, relwidth=1.0, relheight=1.0)
         self.apps_popover.lift()
 
     def _sync_apps_popover(self) -> None:
@@ -1647,12 +1912,18 @@ class DynamicIslandPill:
             self.apps_cal_var.set(bool(c.get("enabled", True)))
         if hasattr(self, "apps_gmail_state_lbl"):
             self.apps_gmail_state_lbl.configure(
-                text=f"Connected ({g.get('account') or 'ready'})" if g.get("connected") else ("Paused" if g.get("configured") else "Off")
+                text=f"● Connected ({g.get('account') or 'ready'})" if g.get("connected") else ("Paused" if g.get("configured") else "Setup Needed"),
+                fg=_PALETTE["accent"] if g.get("connected") else _PALETTE["muted"],
             )
         if hasattr(self, "apps_cal_state_lbl"):
             self.apps_cal_state_lbl.configure(
-                text=f"Connected ({c.get('source') or 'sync'})" if c.get("connected") else "Local"
+                text=f"● Connected ({c.get('source') or 'sync'})" if c.get("connected") else "Local Agenda",
+                fg=_PALETTE["accent"] if c.get("connected") else _PALETTE["muted"],
             )
+        if hasattr(self, "_apps_cloud_lbl"):
+            cmodels = [ _format_cloud_model_label(m) for m in self.available_cloud_models ]
+            cloud_txt = ", ".join(cmodels) if cmodels else "None configured in .env"
+            self._apps_cloud_lbl.configure(text=f"Desktop/FS/Git MCP ready · Cloud APIs: {cloud_txt}")
         if hasattr(self, "apps_btn"):
             n = int(bool(g.get("connected"))) + int(bool(c.get("connected")))
             self.apps_btn.configure(text=f"⊞ Apps · {n}" if n else "⊞ Apps")
@@ -2346,7 +2617,7 @@ class DynamicIslandPill:
         self.mic_btn.pack(side="right")
 
         chips_row = tk.Frame(self.input_row, bg=_PALETTE["panel_mid"])
-        chips_row.pack(fill="x", padx=10, pady=(2, 7))
+        chips_row.pack(fill="x", padx=8, pady=(2, 7))
 
         self.tools_btn = self._mk_btn(
             chips_row,
@@ -2354,13 +2625,13 @@ class DynamicIslandPill:
             self._toggle_tools_popover,
             bg=_PALETTE["card"],
             fg=_PALETTE["steel"],
-            padx=8,
-            pady=3,
+            padx=6,
+            pady=2,
             border_color="#5A667A",
         )
         self.tools_btn.bind("<Enter>", self._on_tools_enter, add="+")
         self.tools_btn.bind("<Leave>", self._on_tools_leave, add="+")
-        self.tools_btn.pack(side="left", padx=(0, 4))
+        self.tools_btn.pack(side="left", padx=(0, 3))
 
         for c_lbl, c_cmd in (
             ("DeepSearch", lambda: self._run_quick("research online about ")),
@@ -2377,10 +2648,10 @@ class DynamicIslandPill:
                 fg="#DCE4EE",
                 hover_bg=_PALETTE["card_hi"],
                 hover_fg=_PALETTE["arc_text"],
-                padx=6,
+                padx=4,
                 pady=2,
                 border_color="#5A667A",
-            ).pack(side="left", padx=(0, 3))
+            ).pack(side="left", padx=(0, 2))
 
         self.send_btn = self._mk_btn(
             chips_row,
@@ -2390,7 +2661,7 @@ class DynamicIslandPill:
             fg="#F2F8FF",
             hover_bg=_PALETTE["cta_hover"],
             hover_fg="#FFFFFF",
-            padx=12,
+            padx=10,
             pady=2,
             border_color=_PALETTE["arc_border"],
         )
@@ -3526,7 +3797,7 @@ class DynamicIslandPill:
             except Exception:
                 pass
 
-    def _apply_geometry_box(self, g: IslandGeometry, *, radius: int | None = None) -> None:
+    def _apply_geometry_box(self, g: IslandGeometry, *, radius: int | None = None, animate_step: bool = False) -> None:
         self._current_geo = g
         if radius is not None:
             r = int(radius)
@@ -3558,15 +3829,16 @@ class DynamicIslandPill:
                     u32.SetWindowPos(wintypes.HWND(top_hwnd), None, g.x, g.y, g.width, g.height, 0x001C)
                     if rgn_key != self._last_rgn_key:
                         self._last_rgn_key = rgn_key
-                        apply_window_region(top_hwnd, g.width, g.height, r, top_flush=top_flush, redraw=False)
+                        apply_window_region(top_hwnd, g.width, g.height, r, top_flush=top_flush, redraw=(not animate_step))
             except Exception:
                 pass
 
         self.root.geometry(f"{g.width}x{g.height}+{g.x}+{g.y}")
-        self.root.update_idletasks()
-        if rgn_key != self._last_rgn_key:
-            self._last_rgn_key = rgn_key
-            apply_window_region(self.root.winfo_id(), g.width, g.height, r, top_flush=top_flush, redraw=True)
+        if not animate_step:
+            self.root.update_idletasks()
+            if rgn_key != self._last_rgn_key:
+                self._last_rgn_key = rgn_key
+                apply_window_region(self.root.winfo_id(), g.width, g.height, r, top_flush=top_flush, redraw=True)
 
     def _apply_geometry(self, animate_from: IslandGeometry | None = None) -> None:
         if getattr(self, "_anim_after_id", None):
@@ -3585,43 +3857,38 @@ class DynamicIslandPill:
                 self.drawer.pack(fill="both", expand=True)
             elif not self.expanded and self.drawer.winfo_manager():
                 self.drawer.pack_forget()
-            self._apply_geometry_box(target)
+            self._apply_geometry_box(target, animate_step=False)
             self._img_refs["brow"] = _draw_brow_crest(
                 self.brow_canvas, target.width, expanded=self.expanded, bg_hex=_PALETTE["bg"]
             )
             return
 
-        frames = compute_spring_frames(animate_from, target, steps=16)
-        brow_mid_drawn = False
+        # Pre-pack drawer BEFORE step 0 when expanding so Tkinter computes child geometry once instead of stalling mid-flight.
+        if self.expanded and not self.drawer.winfo_manager():
+            self.drawer.pack(fill="both", expand=True)
+            self.root.update_idletasks()
+
+        frames = compute_spring_frames(animate_from, target, steps=18)
 
         def _step(idx: int) -> None:
-            nonlocal brow_mid_drawn
             if self._closing or idx >= len(frames):
                 self._anim_after_id = None
                 return
+            is_last = idx == len(frames) - 1
             frame_geo = frames[idx]
-            if self.expanded:
-                if (frame_geo.height >= 165 or idx == len(frames) - 1) and not self.drawer.winfo_manager():
-                    self.drawer.pack(fill="both", expand=True)
-            elif self._pending_collapse_drawer:
-                if frame_geo.height <= 240 or idx == len(frames) - 1:
-                    self._pending_collapse_drawer = False
-                    if self.drawer.winfo_manager():
-                        self.drawer.pack_forget()
-                    self.frame.configure(bg=_PALETTE["gunmetal"], highlightthickness=0)
-            self._apply_geometry_box(frame_geo)
-            if not brow_mid_drawn and self.expanded and frame_geo.width >= 480:
-                brow_mid_drawn = True
-                self._img_refs["brow"] = _draw_brow_crest(
-                    self.brow_canvas, frame_geo.width, expanded=True, bg_hex=_PALETTE["bg"]
-                )
-            if idx == len(frames) - 1:
+            if not self.expanded and self._pending_collapse_drawer and is_last:
+                self._pending_collapse_drawer = False
+                if self.drawer.winfo_manager():
+                    self.drawer.pack_forget()
+                self.frame.configure(bg=_PALETTE["gunmetal"], highlightthickness=0)
+            self._apply_geometry_box(frame_geo, animate_step=(not is_last))
+            if is_last:
                 self._img_refs["brow"] = _draw_brow_crest(
                     self.brow_canvas, frame_geo.width, expanded=self.expanded, bg_hex=_PALETTE["bg"]
                 )
                 self._anim_after_id = None
             else:
-                self._anim_after_id = self.root.after(11, lambda: _step(idx + 1))
+                self._anim_after_id = self.root.after(9, lambda: _step(idx + 1))
 
         _step(0)
 
@@ -3660,30 +3927,30 @@ class DynamicIslandPill:
             self.frame.configure(bg=_PALETTE["bg"], highlightthickness=0)
             self.brow_canvas.pack(side="top", fill="x", padx=4)
             self.header.configure(bg=_PALETTE["hdr_bar"], height=56, highlightthickness=1)
-            self.orb_canvas.configure(bg=_PALETTE["hdr_bar"], width=46, height=46)
-            self.orb_canvas.pack_configure(padx=(6, 4))
+            self.orb_canvas.configure(bg=_PALETTE["hdr_bar"], width=42, height=42)
+            self.orb_canvas.pack_configure(padx=(4, 2))
             self.wave_stack.configure(bg=_PALETTE["hdr_bar"])
-            self.wave_canvas.configure(bg=_PALETTE["hdr_bar"], width=116, height=30)
+            self.wave_canvas.configure(bg=_PALETTE["hdr_bar"], width=68, height=28)
             self.hdr_right.configure(bg=_PALETTE["hdr_bar"])
-            self.hdr_right.pack_configure(padx=(4, 8))
+            self.hdr_right.pack_configure(padx=(2, 6))
             self.mic_lbl_hdr.configure(bg=_PALETTE["hdr_bar"])
             self.capsule_mic_btn.configure(bg=_PALETTE["hdr_bar"])
             self.stop_canvas.configure(bg=_PALETTE["hdr_bar"])
             if self._orb_eye_item and self._img_refs.get("eye_expanded") is not None:
-                self.orb_canvas.coords(self._orb_eye_item, 23, 23)
+                self.orb_canvas.coords(self._orb_eye_item, 21, 21)
                 self.orb_canvas.itemconfigure(self._orb_eye_item, image=self._img_refs["eye_expanded"])
-            self.header.pack(side="top", fill="x", padx=10, pady=(1, 4))
-            self.exp_div1.pack(side="left", padx=4, after=self.orb_canvas)
+            self.header.pack(side="top", fill="x", padx=8, pady=(1, 4))
+            self.exp_div1.pack(side="left", padx=2, after=self.orb_canvas)
             self.model_btn.configure(bg=_PALETTE["well"])
-            self.model_btn.pack(side="left", padx=2, after=self.exp_div1)
-            self.exp_div2.pack(side="left", padx=4, after=self.model_btn)
-            self.hdr_agents_frame.pack(side="left", padx=2, after=self.exp_div2)
-            self.exp_div3.pack(side="left", padx=4, after=self.hdr_agents_frame)
+            self.model_btn.pack(side="left", padx=1, after=self.exp_div1)
+            self.exp_div2.pack(side="left", padx=2, after=self.model_btn)
+            self.hdr_agents_frame.pack(side="left", padx=1, after=self.exp_div2)
+            self.exp_div3.pack(side="left", padx=2, after=self.hdr_agents_frame)
             self.pill_label.pack(side="bottom", pady=(0, 2))
-            self.shutdown_btn.configure(text="⏻ Off", padx=8, pady=2)
-            self.shutdown_btn.pack(side="right", padx=(5, 0))
-            self.mic_lbl_hdr.pack(side="left", padx=(0, 4), before=self.capsule_mic_btn)
-            self.apps_btn.pack(side="left", padx=(0, 4))
+            self.shutdown_btn.configure(text="⏻ Off", padx=6, pady=2)
+            self.shutdown_btn.pack(side="right", padx=(3, 0))
+            self.mic_lbl_hdr.pack(side="left", padx=(0, 3), before=self.capsule_mic_btn)
+            self.apps_btn.pack(side="left", padx=(0, 3))
             self.shutter_btn.pack(side="left", padx=(0, 0))
             if not defer_drawer:
                 self.drawer.pack(fill="both", expand=True)

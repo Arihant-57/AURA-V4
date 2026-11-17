@@ -393,3 +393,28 @@ def test_fast_router_bypasses_compound_desktop_read_and_research_prompts(tmp_pat
     compound_scope = TaskScope("open smart-helmet on desktop, read its files, and research similar ESP32 crash detection")
     assert compound_scope.desktop is True
     assert compound_scope.jarvis is True
+
+
+def test_fast_router_handles_chrome_variants_and_system_folders(tmp_path: Path):
+    router = FastRouter(storage_dir=tmp_path)
+
+    with patch("src.aura.core.fast_router.launch_app_impl", return_value="Launched chrome.exe.") as mock_launch:
+        for phrase in ("open chrome", "open the chrome", "open google chrome", "open chrome browser"):
+            res = router.try_handle(phrase, read_only=False)
+            assert res.handled is True
+            assert res.action == "launch_app"
+        assert mock_launch.call_count == 4
+
+    with patch("src.aura.core.fast_router.open_path_impl", return_value="Opened folder") as mock_open:
+        for phrase in ("open downloads", "open my downloads", "open desktop", "open documents"):
+            res = router.try_handle(phrase, read_only=False)
+            assert res.handled is True
+            assert res.action == "open_path"
+        assert mock_open.call_count == 4
+
+    with patch("src.aura.core.fast_router.open_path_impl", return_value="Opened folder: smart-helmet") as mock_file:
+        r_bare = router.try_handle("open smart helmet", read_only=False)
+        assert r_bare.handled is True
+        assert r_bare.action == "open_path"
+        mock_file.assert_called_once_with("smart helmet", read_only=False)
+

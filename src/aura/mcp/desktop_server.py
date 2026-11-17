@@ -21,6 +21,7 @@ Security & safety:
 from __future__ import annotations
 
 import base64
+from collections import deque
 import ctypes
 from ctypes import wintypes
 from datetime import datetime
@@ -787,12 +788,55 @@ def _is_unsafe_app_token(app_name: str, args: str) -> str | None:
     return None
 
 
+_START_MENU_CACHE: dict[str, Any] = {"ts": 0.0, "roots": None, "links": []}
+
+
+def _common_windows_app_paths(exe_name: str) -> list[Path]:
+    pf = os.environ.get("ProgramFiles", r"C:\Program Files")
+    pf86 = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
+    local = os.environ.get("LocalAppData", "")
+    key = exe_name.lower()
+    mapping: dict[str, list[Path]] = {
+        "chrome.exe": [
+            Path(pf) / "Google" / "Chrome" / "Application" / "chrome.exe",
+            Path(pf86) / "Google" / "Chrome" / "Application" / "chrome.exe",
+            Path(local) / "Google" / "Chrome" / "Application" / "chrome.exe",
+        ],
+        "msedge.exe": [
+            Path(pf86) / "Microsoft" / "Edge" / "Application" / "msedge.exe",
+            Path(pf) / "Microsoft" / "Edge" / "Application" / "msedge.exe",
+        ],
+        "firefox.exe": [
+            Path(pf) / "Mozilla Firefox" / "firefox.exe",
+            Path(pf86) / "Mozilla Firefox" / "firefox.exe",
+        ],
+        "brave.exe": [
+            Path(pf) / "BraveSoftware" / "Brave-Browser" / "Application" / "brave.exe",
+            Path(local) / "BraveSoftware" / "Brave-Browser" / "Application" / "brave.exe",
+        ],
+        "code.cmd": [
+            Path(local) / "Programs" / "Microsoft VS Code" / "bin" / "code.cmd",
+            Path(pf) / "Microsoft VS Code" / "bin" / "code.cmd",
+        ],
+        "spotify.exe": [
+            Path(os.environ.get("APPDATA", "")) / "Spotify" / "Spotify.exe",
+        ],
+        "discord.exe": [
+            Path(local) / "Discord" / "Update.exe",
+        ],
+    }
+    return [p for p in mapping.get(key, ()) if str(p)]
+
+
 def _lookup_app_path(exe_name: str) -> str | None:
     hit = shutil.which(exe_name)
     if hit:
         return hit
     if sys.platform != "win32":
         return None
+    for cand in _common_windows_app_paths(exe_name):
+        if cand.is_file():
+            return str(cand)
     try:
         import winreg
         for root in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
@@ -813,16 +857,36 @@ def _find_start_menu_shortcut(app_name: str) -> Path | None:
     if sys.platform != "win32":
         return None
     needle = app_name.strip().lower()
-    roots = [
+    if len(needle) < 2:
+        return None
+    roots = (
         Path(os.environ.get("ProgramData", "")) / "Microsoft" / "Windows" / "Start Menu" / "Programs",
         Path(os.environ.get("APPDATA", "")) / "Microsoft" / "Windows" / "Start Menu" / "Programs",
-    ]
-    for root in roots:
-        if not root.is_dir():
-            continue
-        for lnk in root.rglob("*.lnk"):
-            if needle in lnk.stem.lower():
-                return lnk
+    )
+    root_sig = tuple(str(r) for r in roots)
+    now = time.monotonic()
+    links: list[Path]
+    if _START_MENU_CACHE["roots"] == root_sig and now - float(_START_MENU_CACHE["ts"]) < 60.0:
+        links = _START_MENU_CACHE["links"]
+    else:
+        links = []
+        for root in roots:
+            if not root.is_dir():
+                continue
+            try:
+                links.extend(root.rglob("*.lnk"))
+            except OSError:
+                continue
+        _START_MENU_CACHE["roots"] = root_sig
+        _START_MENU_CACHE["ts"] = now
+        _START_MENU_CACHE["links"] = links
+
+    for lnk in links:
+        if lnk.stem.lower() == needle and lnk.exists():
+            return lnk
+    for lnk in links:
+        if needle in lnk.stem.lower() and lnk.exists():
+            return lnk
     return None
 
 
@@ -988,41 +1052,46 @@ def _search_local_paths(query: str, max_results: int = 20, location: str = "") -
     seen_paths: set[str] = set()
     visited_dirs = 0
     max_visited_dirs = 1500
+    max_depth = 4
 
-    for root in roots:
-        if visited_dirs >= max_visited_dirs:
-            break
-        root_depth = len(root.parts)
+    # Breadth-first scan level by level so direct Desktop/Downloads hits return in milliseconds
+    queue: deque[tuple[Path, int]] = deque((r, 0) for r in roots)
+    current_level = 0
+    while queue and visited_dirs < max_visited_dirs:
+        cur_dir, cur_depth = queue.popleft()
+        if cur_depth > current_level:
+            # Stop early as soon as a shallow level already yielded strong exact/stem/normalized matches
+            if any(sc[0] <= 3 for sc, _ in scored):
+                break
+            current_level = cur_depth
+        visited_dirs += 1
         try:
-            for cur_root, dirs, files in os.walk(root, followlinks=False):
-                visited_dirs += 1
-                cur_depth = max(0, len(Path(cur_root).parts) - root_depth)
-                # Keep recursion bounded so Desktop/Documents trees return within milliseconds
-                if cur_depth >= 4 or visited_dirs >= max_visited_dirs:
-                    dirs[:] = []
-                else:
-                    dirs[:] = [
-                        d for d in dirs
-                        if not d.startswith(".") and d.lower() not in _SKIP_SEARCH_DIRS
-                    ]
-                for dname in dirs:
-                    cand = Path(cur_root) / dname
-                    sc = _score_local_match(cand, q_low, norm_q, q_tokens, cur_depth)
-                    if sc is not None:
-                        k = str(cand).lower()
-                        if k not in seen_paths:
-                            seen_paths.add(k)
-                            scored.append((sc, cand))
-                for fname in files:
-                    if fname.startswith("."):
+            with os.scandir(cur_dir) as it:
+                for entry in it:
+                    name = entry.name
+                    if name.startswith("."):
                         continue
-                    cand = Path(cur_root) / fname
+                    try:
+                        is_link = entry.is_symlink()
+                    except OSError:
+                        is_link = True
+                    if is_link:
+                        continue
+                    cand = Path(entry.path)
+                    try:
+                        is_dir = entry.is_dir(follow_symlinks=False)
+                    except OSError:
+                        is_dir = False
+                    if is_dir and name.lower() in _SKIP_SEARCH_DIRS:
+                        continue
                     sc = _score_local_match(cand, q_low, norm_q, q_tokens, cur_depth)
                     if sc is not None:
                         k = str(cand).lower()
                         if k not in seen_paths:
                             seen_paths.add(k)
                             scored.append((sc, cand))
+                    if is_dir and cur_depth < max_depth:
+                        queue.append((cand, cur_depth + 1))
         except OSError:
             continue
 

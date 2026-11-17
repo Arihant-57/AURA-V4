@@ -15,7 +15,7 @@ from typing import Any, Callable
 from ..config import get_settings, resolve_workspace, load_aura_env
 from ..config.workspace import normalize_workspace_path, find_referenced_directory
 from ..core import McpHub, SessionMemory, ResultCache
-from ..core.providers import ProviderFactory
+from ..core.providers import ProviderFactory, is_cloud_model_spec
 from ..core.model_registry import ModelRegistry, ModelRole
 from ..core.model_router import (
     ModelRouter, classify_task_role, needs_multi_stage, is_heavy_task, TaskState, TaskStage,
@@ -229,7 +229,8 @@ async def _run_task(
                 except Exception:
                     pass
 
-    if effective_agent == "auto" and needs_multi_stage(routing_task, scope):
+    is_cloud_override = is_cloud_model_spec(getattr(router, "_override", None))
+    if effective_agent == "auto" and not is_cloud_override and needs_multi_stage(routing_task, scope):
         print(f"  [multi-stage: analysis -> coding -> verification]")
         state = TaskState(
             original_request=routing_task,

@@ -202,7 +202,7 @@ async def test_gemini_default_38_flash_and_503_failover_to_36_flash(monkeypatch)
 
     with patch("src.aura.core.providers.httpx.AsyncClient") as mock_client_cls:
         client_inst = AsyncMock()
-        client_inst.post.side_effect = [resp_503, resp_ok]
+        client_inst.post.side_effect = [resp_503, resp_503, resp_ok]
         mock_client_cls.return_value.__aenter__.return_value = client_inst
 
         out = await provider.chat([{"role": "user", "content": "hi"}])
@@ -210,7 +210,8 @@ async def test_gemini_default_38_flash_and_503_failover_to_36_flash(monkeypatch)
     assert out.message.content == "gemini 3.6 ok"
     assert provider.api_model == "gemini-3.6-flash"
     assert "gemini->503" in provider.failover_events
-    assert client_inst.post.call_args_list[1].kwargs["json"]["model"] == "gemini-3.6-flash"
+    assert client_inst.post.call_args_list[1].kwargs["json"]["model"] == "gemini-3-flash-preview"
+    assert client_inst.post.call_args_list[2].kwargs["json"]["model"] == "gemini-3.6-flash"
 
 
 @pytest.mark.asyncio
@@ -273,5 +274,30 @@ async def test_gemini_thought_signature_preserved_across_agent_loop_turns(tmp_pa
     assert asst_msgs[-1]["tool_calls"][0]["id"] == "call_gem_1"
     assert asst_msgs[-1]["tool_calls"][0]["extra_content"] == {"google": {"thought_signature": "sig_token_xyz"}}
     assert tool_msgs[-1]["tool_call_id"] == "call_gem_1"
+
+
+@pytest.mark.asyncio
+async def test_gemini_503_failover_prefers_fast_3_flash_preview(monkeypatch):
+    for k in ("GROQ_API_KEY", "OPENROUTER_API_KEY", "GITHUB_TOKEN", "AURA_CLOUD_API_KEY", "AURA_CLOUD_BASE_URL", "FREELLMAPI_ENDPOINT", "FREELLMAPI_KEY", "GEMINI_MODEL", "AURA_GEMINI_MODEL"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("GEMINI_API_KEY", "gm_key")
+
+    with patch("src.aura.config.settings.load_aura_env", return_value=None):
+        provider = CloudProvider("cloud:gemini")
+
+    resp_503 = MagicMock(status_code=503, text="high demand")
+    resp_ok = MagicMock(status_code=200)
+    resp_ok.json.return_value = {"choices": [{"message": {"content": "fast preview ok"}}]}
+
+    with patch("src.aura.core.providers.httpx.AsyncClient") as mock_client_cls:
+        client_inst = AsyncMock()
+        client_inst.post.side_effect = [resp_503, resp_ok]
+        mock_client_cls.return_value.__aenter__.return_value = client_inst
+
+        out = await provider.chat([{"role": "user", "content": "hi"}])
+
+    assert out.message.content == "fast preview ok"
+    assert provider.api_model == "gemini-3-flash-preview"
+
 
 

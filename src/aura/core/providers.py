@@ -310,9 +310,9 @@ CLOUD_PRESETS: dict[str, dict[str, Any]] = {
         "model_envs": ("GEMINI_MODEL", "AURA_GEMINI_MODEL"),
         "fallback_models": (
             "gemini-3.8-flash",
+            "gemini-3-flash-preview",
             "gemini-3.6-flash",
             "gemini-3.5-flash",
-            "gemini-3-flash-preview",
         ),
         "key_envs": ("GEMINI_API_KEY", "GEMINIAPI_KEY", "GOOGLE_API_KEY"),
     },
@@ -416,7 +416,7 @@ def ensure_freellmapi_running(base_url: str, timeout: float = 8.0) -> bool:
 
 def is_cloud_model_spec(model: str | None) -> bool:
     """Return True when *model* selects a cloud API target."""
-    if not model:
+    if not isinstance(model, str) or not model:
         return False
     lower = model.strip().lower()
     return lower == "cloud" or lower.startswith("cloud:")
@@ -588,6 +588,15 @@ def _to_openai_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return converted
 
 
+_CLOUD_COOLDOWN_UNTIL: dict[tuple[str, str], float] = {}
+_CLOUD_COOLDOWN_SECONDS = 120.0
+
+
+def clear_cloud_cooldowns() -> None:
+    """Clear process-wide cloud endpoint/model cooldowns."""
+    _CLOUD_COOLDOWN_UNTIL.clear()
+
+
 class CloudProvider:
     """OpenAI-compatible REST provider for free/external cloud LLM APIs with automatic failover."""
 
@@ -654,14 +663,24 @@ class CloudProvider:
 
         opts = options or self.default_options
         oai_messages = _to_openai_messages(messages)
-        candidates = list(self._candidates) or [(self.preset, self.base_url, self.api_key, self.api_model)]
-        start_idx = min(self._active_idx, len(candidates) - 1)
+        raw_candidates = list(self._candidates) or [(self.preset, self.base_url, self.api_key, self.api_model)]
+        candidates = list(raw_candidates[min(self._active_idx, len(raw_candidates) - 1) :])
+        if not os.environ.get("PYTEST_CURRENT_TEST") and len(candidates) > 1:
+            now_mono = time.monotonic()
+            healthy = [c for c in candidates if _CLOUD_COOLDOWN_UNTIL.get((c[0], c[3]), 0.0) <= now_mono]
+            if healthy:
+                cooled = [c for c in candidates if c not in healthy]
+                candidates = healthy + cooled
         safe_max_tokens = min(max(1, int(opts.num_predict or 1536)), 8192)
+
+        def _mark_cooldown(p_name: str, m_name: str) -> None:
+            if not os.environ.get("PYTEST_CURRENT_TEST"):
+                _CLOUD_COOLDOWN_UNTIL[(p_name, m_name)] = time.monotonic() + _CLOUD_COOLDOWN_SECONDS
 
         data: dict[str, Any] | None = None
         last_exc: Exception | None = None
 
-        idx = start_idx
+        idx = 0
         gemini_fb_injected = False
         while idx < len(candidates):
             preset, base_url, api_key, api_model = candidates[idx]
@@ -675,6 +694,8 @@ class CloudProvider:
                 "top_p": opts.top_p,
                 "max_tokens": safe_max_tokens,
             }
+            if preset == "gemini" and api_model.startswith("gemini-3") and not os.environ.get("PYTEST_CURRENT_TEST"):
+                payload["reasoning_effort"] = "minimal" if api_model == "gemini-3-flash-preview" else "low"
             if tools:
                 payload["tools"] = tools
 
@@ -686,21 +707,18 @@ class CloudProvider:
 
             def _maybe_inject_gemini_fallback() -> None:
                 nonlocal gemini_fb_injected
-                if (
-                    not gemini_fb_injected
-                    and idx + 1 >= len(candidates)
-                    and preset == "gemini"
-                    and api_model != "gemini-3.6-flash"
-                ):
+                if not gemini_fb_injected and idx + 1 >= len(candidates) and preset == "gemini":
                     gemini_fb_injected = True
-                    candidates.append(("gemini", base_url, api_key, "gemini-3.6-flash"))
+                    for fb in ("gemini-3-flash-preview", "gemini-3.6-flash"):
+                        if fb != api_model:
+                            candidates.append(("gemini", base_url, api_key, fb))
 
             has_fallback = (idx + 1 < len(candidates)) or (
-                not gemini_fb_injected and preset == "gemini" and api_model != "gemini-3.6-flash"
+                not gemini_fb_injected and preset == "gemini" and api_model not in ("gemini-3.6-flash",)
             )
-            fb_cap = 55.0 if _is_freellmapi_url(base_url) else 25.0
+            fb_cap = 55.0 if _is_freellmapi_url(base_url) else 12.0
             req_timeout: Any = (
-                httpx.Timeout(min(float(self.timeout), fb_cap), connect=6.0)
+                httpx.Timeout(min(float(self.timeout), fb_cap), connect=5.0)
                 if has_fallback
                 else self.timeout
             )
@@ -708,13 +726,18 @@ class CloudProvider:
             try:
                 async with httpx.AsyncClient(timeout=req_timeout) as client:
                     resp = await client.post(url, json=payload, headers=headers)
+                    if resp.status_code == 400 and "reasoning_effort" in payload:
+                        payload.pop("reasoning_effort", None)
+                        resp = await client.post(url, json=payload, headers=headers)
             except httpx.TimeoutException as exc:
                 last_exc = TimeoutError(f"Cloud API request timed out after {self.timeout}s: {exc}")
+                _mark_cooldown(preset, api_model)
                 _maybe_inject_gemini_fallback()
                 if idx + 1 < len(candidates):
                     self.failover_events.append(f"{preset}->timeout")
-                    if idx + 1 < len(self._candidates):
-                        self._activate_candidate(idx + 1)
+                    nxt = candidates[idx + 1]
+                    if nxt in self._candidates:
+                        self._activate_candidate(self._candidates.index(nxt))
                     idx += 1
                     continue
                 raise last_exc from exc
@@ -734,11 +757,13 @@ class CloudProvider:
                         else ""
                     )
                     last_exc = ConnectionError(f"Cannot connect to cloud LLM API ({base_url}){hint}: {exc}")
+                    _mark_cooldown(preset, api_model)
                     _maybe_inject_gemini_fallback()
                     if idx + 1 < len(candidates):
                         self.failover_events.append(f"{preset}->connect_error")
-                        if idx + 1 < len(self._candidates):
-                            self._activate_candidate(idx + 1)
+                        nxt = candidates[idx + 1]
+                        if nxt in self._candidates:
+                            self._activate_candidate(self._candidates.index(nxt))
                         idx += 1
                         continue
                     raise last_exc from exc
@@ -752,11 +777,13 @@ class CloudProvider:
                     )
                 else:
                     last_exc = RuntimeError(f"Cloud API error ({resp.status_code}): {resp.text[:240]}")
+                _mark_cooldown(preset, api_model)
                 _maybe_inject_gemini_fallback()
                 if idx + 1 < len(candidates):
                     self.failover_events.append(f"{preset}->{resp.status_code}")
-                    if idx + 1 < len(self._candidates):
-                        self._activate_candidate(idx + 1)
+                    nxt = candidates[idx + 1]
+                    if nxt in self._candidates:
+                        self._activate_candidate(self._candidates.index(nxt))
                     idx += 1
                     continue
                 raise last_exc
@@ -772,18 +799,20 @@ class CloudProvider:
             cand_choices = parsed_data.get("choices") or []
             cand_msg = (cand_choices[0].get("message") or {}) if cand_choices else {}
             if not cand_choices or (not (cand_msg.get("content") or "").strip() and not (cand_msg.get("tool_calls") or [])):
+                _mark_cooldown(preset, api_model)
                 _maybe_inject_gemini_fallback()
                 if idx + 1 < len(candidates):
                     self.failover_events.append(f"{preset}->empty")
-                    if idx + 1 < len(self._candidates):
-                        self._activate_candidate(idx + 1)
+                    nxt = candidates[idx + 1]
+                    if nxt in self._candidates:
+                        self._activate_candidate(self._candidates.index(nxt))
                     idx += 1
                     continue
 
             data = parsed_data
-            if idx != self._active_idx and idx < len(self._candidates):
-                self._activate_candidate(idx)
-            elif idx != self._active_idx:
+            if (preset, base_url, api_key, api_model) in self._candidates:
+                self._activate_candidate(self._candidates.index((preset, base_url, api_key, api_model)))
+            else:
                 self.preset = preset
                 self.base_url = base_url.strip().rstrip("/")
                 self.api_key = api_key

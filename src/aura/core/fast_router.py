@@ -889,7 +889,7 @@ class FastRouter:
         m_open = _OPEN_RE.match(norm)
         if m_open:
             raw_target = m_open.group("target").strip()
-            target = re.sub(r"^(?:like|the)\s+", "", raw_target, flags=re.IGNORECASE).strip()
+            target = re.sub(r"^(?:like|the|my|a|an)\s+", "", raw_target, flags=re.IGNORECASE).strip()
             lower_raw = raw_target.lower()
             lower_target = target.lower()
             if (
@@ -899,6 +899,28 @@ class FastRouter:
             ):
                 if resolve_site_target(target) is not None:
                     return _done(open_website_impl(target, read_only=read_only), "open_website")
+                _known_folder_map = {
+                    "desktop": Path.home() / "Desktop",
+                    "downloads": Path.home() / "Downloads",
+                    "download": Path.home() / "Downloads",
+                    "documents": Path.home() / "Documents",
+                    "document": Path.home() / "Documents",
+                }
+                if lower_target in _known_folder_map:
+                    folder_p = _known_folder_map[lower_target]
+                    return _done(open_path_impl(str(folder_p), read_only=read_only), "open_path")
+                _known_app_tokens = {
+                    "chrome", "google chrome", "chrome browser",
+                    "edge", "microsoft edge", "msedge", "edge browser",
+                    "firefox", "brave", "notepad", "calc", "calculator",
+                    "vs code", "vscode", "code", "terminal", "paint",
+                    "spotify", "discord", "explorer", "file explorer",
+                    "task manager", "settings",
+                }
+                app_cand = re.sub(r"\s+(?:browser|app)$", "", lower_target).strip()
+                if lower_target in _known_app_tokens or app_cand in _known_app_tokens:
+                    return _done(launch_app_impl(app_cand if app_cand in _known_app_tokens else target, read_only=read_only), "launch_app")
+
                 target_words = lower_target.split()
                 _web_or_media_tokens = {
                     "on", "in", "from", "page", "youtube", "video", "videos",
@@ -910,6 +932,10 @@ class FastRouter:
                     and len(target_words) <= 3
                     and not set(target_words).intersection(_web_or_media_tokens)
                 ):
+                    if not any(w in target_words for w in ("workspace", "repo", "repository", "readme", "codebase")):
+                        path_ans = open_path_impl(target, read_only=read_only)
+                        if not path_ans.startswith("NOT FOUND:"):
+                            return _done(path_ans, "open_path")
                     ans = launch_app_impl(target, read_only=read_only)
                     return _done(ans, "launch_app")
 

@@ -38,7 +38,20 @@ $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Speech
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
-$rec = New-Object System.Speech.Recognition.SpeechRecognitionEngine
+$rec = $null
+try {
+    $installed = [System.Speech.Recognition.SpeechRecognitionEngine]::InstalledRecognizers()
+    foreach ($lang in @('en-IN', 'en-GB')) {
+        $match = $installed | Where-Object { $_.Culture.Name -eq $lang } | Select-Object -First 1
+        if ($null -ne $match) {
+            $rec = New-Object System.Speech.Recognition.SpeechRecognitionEngine($match.Culture)
+            break
+        }
+    }
+} catch {}
+if ($null -eq $rec) {
+    $rec = New-Object System.Speech.Recognition.SpeechRecognitionEngine
+}
 $rec.BabbleTimeout = [TimeSpan]::FromSeconds(0)
 $rec.InitialSilenceTimeout = [TimeSpan]::FromSeconds(0)
 $rec.EndSilenceTimeout = [TimeSpan]::FromMilliseconds(1600)
@@ -114,10 +127,14 @@ _CONVERSATIONAL_FOLLOWUPS = frozenset({
 
 
 _WHISPER_INITIAL_PROMPT = (
-    "Hey Jarvis, Aura, Ultron, Megatron. Create a project plan, Kubernetes Horizontal Pod Autoscaler, "
-    "CC lab evaluation, scan the repository, open YouTube, open Gmail, open Google Calendar, "
-    "open Chrome, open VS Code, stop, pause, cancel, quiet, what is on my calendar today, "
-    "read my emails, search workspace."
+    "Hey Jarvis, Aura, Ultron, Megatron, Arihant. Open Chrome, open Gmail, open Google Calendar, "
+    "open Downloads, open Desktop, open Documents, open VS Code, open smart helmet, "
+    "use Gemini, use FreeLLMAPI, summarize my day, read my emails, stop, pause, cancel."
+)
+
+_DEFAULT_HOTWORDS = (
+    "Aura, Jarvis, Ultron, Arihant, Chrome, Gmail, Calendar, FreeLLMAPI, Gemini, "
+    "Downloads, Desktop, Documents, smart-helmet, YouTube"
 )
 
 _INDIAN_EN_REPLACEMENTS: tuple[tuple[re.Pattern[str], str], ...] = (
@@ -126,11 +143,55 @@ _INDIAN_EN_REPLACEMENTS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"\bcalender\b", re.IGNORECASE), "calendar"),
     (re.compile(r"\bv\s*s\s+code\b", re.IGNORECASE), "VS Code"),
     (re.compile(r"\bbrowzer\b", re.IGNORECASE), "browser"),
+    (re.compile(r"\b(?:krome|crom)\b", re.IGNORECASE), "Chrome"),
+    (re.compile(r"\b(?:googal|googel)\b", re.IGNORECASE), "Google"),
+    (re.compile(r"\b(?:jemini|geminy|gemni|jimini)\b", re.IGNORECASE), "Gemini"),
+    (re.compile(r"\bfree\s+l(?:lm|m|l)\s*a\s*p\s*i\b|\bfree\s+llapi\b", re.IGNORECASE), "FreeLLMAPI"),
+    (re.compile(r"\bdown\s+loads\b", re.IGNORECASE), "Downloads"),
+    (re.compile(r"\bdesk\s+top\b", re.IGNORECASE), "Desktop"),
+    (re.compile(r"\bwhats\s+app\b", re.IGNORECASE), "WhatsApp"),
+    (re.compile(r"\b(?:arihanth|arihant\s+sir|are\s+you\s+hunt)\b", re.IGNORECASE), "Arihant"),
+    (re.compile(r"\b(hey|hi|hello|ok|okay|open|ask|stop)\s+ora\b", re.IGNORECASE), r"\1 Aura"),
     (re.compile(r"\b(?:altron|altrons|ultran|oltron)\b", re.IGNORECASE), "Ultron"),
     (re.compile(r"\bmega\s+tron\b", re.IGNORECASE), "Megatron"),
     (re.compile(r"\bhey\s+(?:service|jarves|jarvish|charvis|chavis|javis|jar\s+vis)\b", re.IGNORECASE), "Hey Jarvis"),
     (re.compile(r"\b(?:jarves|jarvish|charvis|chavis|javis|jar\s+vis)\b", re.IGNORECASE), "Jarvis"),
 )
+
+
+def _build_whisper_prompt_and_hotwords() -> tuple[str, str]:
+    """Build domain & user-name biased Whisper prompt/hotwords for Indian-English clarity."""
+    extra_terms: list[str] = []
+    seen: set[str] = set()
+
+    def _add_term(raw: str) -> None:
+        clean = " ".join(str(raw or "").split()).strip(" .,:;")
+        if 2 <= len(clean) <= 40:
+            key = clean.lower()
+            if key not in seen:
+                seen.add(key)
+                extra_terms.append(clean)
+
+    try:
+        from pathlib import Path
+        from .personal_memory import PersonalMemoryStore
+
+        store = PersonalMemoryStore()
+        for fact in store.list_facts()[:20]:
+            for tok in re.findall(r"\b[A-Z][a-zA-Z0-9_-]{2,24}\b", fact.text):
+                _add_term(tok)
+        desktop = Path.home() / "Desktop"
+        if desktop.is_dir():
+            for entry in list(desktop.iterdir())[:12]:
+                if not entry.name.startswith("."):
+                    _add_term(entry.stem if entry.is_file() else entry.name)
+    except Exception:
+        pass
+
+    if extra_terms:
+        extra_str = ", ".join(extra_terms[:10])
+        return f"{_WHISPER_INITIAL_PROMPT} Names & folders: {extra_str}.", f"{_DEFAULT_HOTWORDS}, {extra_str}"
+    return _WHISPER_INITIAL_PROMPT, _DEFAULT_HOTWORDS
 
 _STOP_CMD_RE = re.compile(
     r"^(?:(?:hey|ok|okay|hi|please|wait|hold\s+on)[,\s]+)*(?:(?:jarvis|aura|ultron|megatron)[,\s]+)?(?:stop|pause|cancel|abort|quiet|hush|shut\s+up|be\s+quiet|stop\s+talking|stop\s+speaking|stop\s+reading|stop\s+it|never\s+mind|nevermind)(?:[,\s]+(?:please|now|jarvis|aura|ultron|megatron))?[.!?]*$",
@@ -204,8 +265,22 @@ def _has_whisper_mic_deps() -> bool:
         return False
 
 
+def _resolve_whisper_model_name(requested: str = "base.en") -> str:
+    env_mdl = os.environ.get("AURA_WHISPER_MODEL", "").strip()
+    if env_mdl:
+        return env_mdl
+    if requested == "base.en":
+        from pathlib import Path
+        hub_dir = Path.home() / ".cache" / "huggingface" / "hub"
+        for preferred in ("small.en", "small"):
+            if (hub_dir / f"models--Systran--faster-whisper-{preferred}").is_dir():
+                return preferred
+    return requested
+
+
 def _get_whisper_model(model_size: str = "base.en") -> Any:
     global _CACHED_WHISPER_MODEL
+    chosen = _resolve_whisper_model_name(model_size)
     with _WHISPER_MODEL_LOCK:
         if _CACHED_WHISPER_MODEL is not None:
             return _CACHED_WHISPER_MODEL
@@ -214,14 +289,14 @@ def _get_whisper_model(model_size: str = "base.en") -> Any:
 
         try:
             _CACHED_WHISPER_MODEL = WhisperModel(
-                model_size,
+                chosen,
                 device="cpu",
                 compute_type="int8",
                 local_files_only=True,
             )
         except Exception:
             _CACHED_WHISPER_MODEL = WhisperModel(
-                model_size,
+                chosen,
                 device="cpu",
                 compute_type="int8",
                 local_files_only=False,
@@ -239,6 +314,7 @@ def transcribe_whisper_audio(model: Any, audio: Any) -> str:
     except Exception:
         normalized_audio = audio
 
+    prompt_txt, hotwords_txt = _build_whisper_prompt_and_hotwords()
     try:
         segments, _ = model.transcribe(
             normalized_audio,
@@ -246,18 +322,31 @@ def transcribe_whisper_audio(model: Any, audio: Any) -> str:
             beam_size=5,
             best_of=5,
             temperature=0.0,
-            initial_prompt=_WHISPER_INITIAL_PROMPT,
+            initial_prompt=prompt_txt,
+            hotwords=hotwords_txt,
             condition_on_previous_text=False,
             vad_filter=False,
         )
     except TypeError:
-        segments, _ = model.transcribe(
-            normalized_audio,
-            language="en",
-            beam_size=1,
-            condition_on_previous_text=False,
-            vad_filter=False,
-        )
+        try:
+            segments, _ = model.transcribe(
+                normalized_audio,
+                language="en",
+                beam_size=5,
+                best_of=5,
+                temperature=0.0,
+                initial_prompt=prompt_txt,
+                condition_on_previous_text=False,
+                vad_filter=False,
+            )
+        except TypeError:
+            segments, _ = model.transcribe(
+                normalized_audio,
+                language="en",
+                beam_size=1,
+                condition_on_previous_text=False,
+                vad_filter=False,
+            )
     kept: list[str] = []
     for seg in segments:
         no_speech = getattr(seg, "no_speech_prob", 0.0) or 0.0

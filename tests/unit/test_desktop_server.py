@@ -596,3 +596,19 @@ def test_desktop_inspect_path_reads_folder_files_and_blocks_sensitive_paths(tmp_
         )
         assert ds.read_screen_ocr_impl("notepad").startswith("WINDOW MINIMIZED:")
 
+
+def test_bfs_shallow_local_search_stops_before_deep_subtree(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.setenv("HOME", str(tmp_path))
+    desktop = tmp_path / "Desktop"
+    target = desktop / "smart-helmet"
+    target.mkdir(parents=True, exist_ok=True)
+    # Deep sibling tree in Documents that would slow a naive full walk
+    deep_dir = tmp_path / "Documents" / "giant" / "lvl1" / "lvl2" / "lvl3"
+    deep_dir.mkdir(parents=True, exist_ok=True)
+    (deep_dir / "noise.txt").write_text("x", encoding="utf-8")
+
+    hits = ds._search_local_paths("smart helmet", max_results=5)
+    assert hits and hits[0] == target
+
+

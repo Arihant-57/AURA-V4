@@ -305,3 +305,36 @@ def test_fallback_speech_start_line_triggers_onset_without_dropping_followup():
     ml.stop()
     assert onsets == ["onset"]
     assert transcripts == ["what is on my desktop"]
+
+
+def test_indian_english_prompt_hotwords_and_name_normalization():
+    from types import SimpleNamespace
+    from src.aura.core.mic_listener import (
+        _build_whisper_prompt_and_hotwords,
+        normalize_indian_english_transcript,
+        transcribe_whisper_audio,
+    )
+
+    prompt_txt, hotwords_txt = _build_whisper_prompt_and_hotwords()
+    assert "Arihant" in prompt_txt and "Arihant" in hotwords_txt
+    assert "Chrome" in hotwords_txt
+
+    assert normalize_indian_english_transcript("hey ora open krome") == "hey Aura open Chrome"
+    assert normalize_indian_english_transcript("open down loads") == "open Downloads"
+    assert normalize_indian_english_transcript("use jemini or free llapi") == "use Gemini or FreeLLMAPI"
+    assert normalize_indian_english_transcript("my name is arihanth") == "my name is Arihant"
+    assert normalize_indian_english_transcript("Hey altron open chrome") == "Hey Ultron open chrome"
+
+    import numpy as np
+
+    seen_kwargs: dict = {}
+
+    class _KwWhisper:
+        def transcribe(self, audio, **kwargs):
+            seen_kwargs.update(kwargs)
+            return [SimpleNamespace(text="open krome in down loads", no_speech_prob=0.05, avg_logprob=-0.2)], None
+
+    tx = transcribe_whisper_audio(_KwWhisper(), np.full(1600, 0.1, dtype=np.float32))
+    assert tx == "open Chrome in Downloads"
+    assert "hotwords" in seen_kwargs and "Arihant" in seen_kwargs["hotwords"]
+
