@@ -626,11 +626,25 @@ def test_desktop_whatsapp_web_fallback_and_ui_see_text(monkeypatch):
         assert "https://web.whatsapp.com" in res
         assert opened_web == ["https://web.whatsapp.com"]
 
-        monkeypatch.setattr(ds, "_find_window", lambda t: {"hwnd": 77, "title": "buggy_demo.py - Notepad", "minimized": False})
+        monkeypatch.setattr(
+            ds,
+            "_find_window",
+            lambda t: {
+                "hwnd": 77,
+                "title": "buggy_demo.py - Notepad",
+                "minimized": False,
+                "rect": {"left": 0, "top": 0, "right": 500, "bottom": 400},
+            },
+        )
         monkeypatch.setattr(ds, "_run_powershell", lambda script, timeout=10: (0, "[Button] File\n=== WINDOW TEXT ===\ndef broken(): pass", ""))
         see_out = ds.ui_see_impl("Notepad")
         assert "=== WINDOW TEXT ===" in see_out
         assert "def broken(): pass" in see_out
+
+        monkeypatch.setattr("PIL.ImageGrab.grab", MagicMock(side_effect=OSError("screen grab failed")))
+        ocr_fb = ds.read_screen_ocr_impl("Notepad")
+        assert "UI Automation text" in ocr_fb
+        assert "def broken(): pass" in ocr_fb
 
 
 

@@ -1582,6 +1582,10 @@ def read_screen_ocr_impl(target: str = "") -> str:
         try:
             img = ImageGrab.grab(bbox=bbox, all_screens=bool(bbox))
         except OSError as exc:
+            if target.strip():
+                uia_text = ui_see_impl(target)
+                if not uia_text.startswith(("ERROR:", "NOT FOUND:")):
+                    return f"[OCR unavailable ({exc}); UI Automation text for {label}]\n{uia_text}"
             return f"ERROR: Screen capture unavailable ({exc}). Unlock desktop or run in an interactive Windows session."
         try:
             img.save(tmp_path)
