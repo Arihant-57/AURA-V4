@@ -174,6 +174,10 @@ def classify_task_role(task: str, scope: TaskScope) -> ModelRole:
     # Coding signals
     coding_signals = {"fix", "implement", "create", "write", "add", "refactor",
                       "change", "modify", "update", "edit", "patch", "build"}
+    # Keep everyday prose/calendar/email phrasing on the fast hot 4B model instead of cold-swapping 7B coder weights.
+    non_code_prose_signals = {"email", "mail", "gmail", "message", "letter", "draft", "calendar", "event", "meeting", "todo", "reminder", "summary", "notes", "note", "agenda"}
+    repo_code_signals = {"repo", "repository", "codebase", "module", "modules", "endpoint", "api", "server", "backend", "frontend", "class", "function", "component", "route", "handler", "bug", "test", "tests", "script", "code"}
+    has_code_ext = bool(re.search(r"[\w./\\-]+\.(?:py|js|ts|tsx|jsx|cpp|hpp|h|c|json|html|css|sql|sh)\b", lower))
     # Verification signals
     verify_signals = {"test", "verify", "check", "validate", "review", "audit",
                       "coverage", "lint", "assert"}
@@ -183,6 +187,14 @@ def classify_task_role(task: str, scope: TaskScope) -> ModelRole:
                         "what does", "show me", "list", "find"}
 
     tokens = _extract_words(task)
+
+    if (
+        tokens & non_code_prose_signals
+        and not has_code_ext
+        and not (scope.backend or scope.frontend or scope.git)
+        and not (tokens & repo_code_signals)
+    ):
+        return ModelRole.LIGHTWEIGHT
 
     if tokens & coding_signals and not scope.conversational:
         return ModelRole.CODING

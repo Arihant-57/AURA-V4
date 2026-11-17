@@ -16,6 +16,7 @@ import hashlib
 import inspect
 import json
 import logging
+import os
 import queue
 import re
 import time
@@ -34,7 +35,12 @@ from ..core import (
     ErrorCategory, classify_tool_result, is_tool_error_text,
 )
 from ..core.file_tracker import _merge_ranges
-from ..core.providers import OllamaProvider
+from ..core.providers import (
+    OllamaProvider,
+    create_local_qwen_fallback,
+    ensure_ollama_running,
+    is_cloud_model_spec,
+)
 from ..core.scope import detect_browser_intent, detect_desktop_intent, detect_jarvis_intent
 from ..core.model_router import TaskState, TaskStage
 from ..core.prompts import (
@@ -666,7 +672,41 @@ async def run_agent_loop(
     ollama_tools = [mcp_tool_to_ollama(t, scope) for t in active_tools]
 
     # Build clear system prompt from centralized source
-    model_label = str(getattr(provider, "model", "") or "local-ollama")
+    active_provider = provider
+    switched_to_qwen = False
+    model_label = str(getattr(active_provider, "model", "") or "local-ollama")
+
+    async def _try_switch_to_qwen(reason: Exception) -> bool:
+        nonlocal active_provider, switched_to_qwen, model_label
+        if (
+            switched_to_qwen
+            or os.environ.get("AURA_CLOUD_STRICT") == "1"
+            or not is_cloud_model_spec(getattr(active_provider, "model", None))
+        ):
+            return False
+        num_ctx = getattr(getattr(active_provider, "default_options", None), "num_ctx", None)
+        fb = create_local_qwen_fallback(num_ctx=num_ctx)
+        available = await asyncio.to_thread(fb.is_model_available)
+        if not available and not os.environ.get("PYTEST_CURRENT_TEST"):
+            if await asyncio.to_thread(ensure_ollama_running, 4.0):
+                available = await asyncio.to_thread(fb.is_model_available)
+        if not available:
+            return False
+        switched_to_qwen = True
+        active_provider = fb
+        model_label = str(getattr(fb, "model", "qwen3.5:4b"))
+        if task_state is not None and fb not in task_state.used_providers:
+            task_state.used_providers.append(fb)
+        logger.warning("Cloud provider unavailable (%s); falling back to %s.", reason, model_label)
+        await _emit_loop_event(
+            on_event,
+            event="stage",
+            stage="fallback",
+            model=model_label,
+            message=f"Gemini limit/outage — switched to {model_label}...",
+        )
+        return True
+
     if scope.conversational:
         system_prompt = (
             JARVIS_CONVERSATIONAL_PROMPT
@@ -829,7 +869,13 @@ async def run_agent_loop(
                             ),
                         },
                     ]
-                    synth_resp = await provider.chat(synthesis_messages, tools=None)
+                    try:
+                        synth_resp = await active_provider.chat(synthesis_messages, tools=None)
+                    except Exception as exc:
+                        if await _try_switch_to_qwen(exc):
+                            synth_resp = await active_provider.chat(synthesis_messages, tools=None)
+                        else:
+                            raise
                     synth_answer = (synth_resp.message.content or "").strip()
                     if synth_answer and synth_answer != "(no answer)":
                         valid = True
@@ -868,9 +914,13 @@ async def run_agent_loop(
         )
         for attempt in range(settings.agent.model_call_attempts):
             try:
-                response = await provider.chat(messages_to_send, tools=ollama_tools if active_tool_names else None)
+                response = await active_provider.chat(messages_to_send, tools=ollama_tools if active_tool_names else None)
                 break
             except ConnectionError as e:
+                if await _try_switch_to_qwen(e):
+                    continue
+                if is_cloud_model_spec(getattr(active_provider, "model", None)):
+                    return f"Error: {e}"
                 # Transient: network connection issue
                 logger.warning("Model call attempt %d failed (ConnectionError): %s", attempt + 1, e)
                 if attempt < settings.agent.model_call_attempts - 1:
@@ -878,6 +928,10 @@ async def run_agent_loop(
                 else:
                     return f"Error: Failed to get model response after {settings.agent.model_call_attempts} attempts: {e}"
             except (TimeoutError, asyncio.TimeoutError) as e:
+                if await _try_switch_to_qwen(e):
+                    continue
+                if is_cloud_model_spec(getattr(active_provider, "model", None)):
+                    return f"Error: {e}"
                 # Transient: operation timeout
                 logger.warning("Model call attempt %d failed (TimeoutError): %s", attempt + 1, e)
                 if attempt < settings.agent.model_call_attempts - 1:
@@ -885,10 +939,16 @@ async def run_agent_loop(
                 else:
                     return f"Error: Failed to get model response after {settings.agent.model_call_attempts} attempts: {e}"
             except ValueError as e:
+                if await _try_switch_to_qwen(e):
+                    continue
                 # Permanent: model not found, invalid config, etc.
                 logger.error("Model call failed with permanent error: %s", e)
                 return f"Error: {e}"
             except Exception as e:
+                if await _try_switch_to_qwen(e):
+                    continue
+                if is_cloud_model_spec(getattr(active_provider, "model", None)):
+                    return f"Error: {e}"
                 # Other errors - retry as potentially transient
                 logger.warning("Model call attempt %d failed: %s", attempt + 1, e)
                 if attempt < settings.agent.model_call_attempts - 1:
@@ -1235,7 +1295,7 @@ async def run_agent_loop(
             if consecutive_duplicate_turns >= settings.agent.max_duplicate_only_turns or max_poll_stalls >= 2:
                 logger.info("Duplicate/stall threshold reached (dups=%d, poll_stalls=%d); forcing synthesis.", consecutive_duplicate_turns, max_poll_stalls)
                 try:
-                    synthesis_resp = await provider.chat(messages, tools=None)
+                    synthesis_resp = await active_provider.chat(messages, tools=None)
                     synth_content = (synthesis_resp.message.content or "").strip()
                     if synth_content:
                         pending_steers = await _drain_pending_steers(steer_queue, get_pending_steer, memory)
@@ -1298,7 +1358,7 @@ async def run_agent_loop(
             if empty_reply_count > max_empty_replies:
                 if scope.conversational and not [m for m in messages if m.get("role") == "tool"]:
                     return f"Online and ready—currently running on {model_label} inside AURA V4. How can I help?"
-                forced = await _force_answer_from_evidence(messages, provider, scope)
+                forced = await _force_answer_from_evidence(messages, active_provider, scope)
                 pending_steers = await _drain_pending_steers(steer_queue, get_pending_steer, memory)
                 if pending_steers:
                     await _apply_steers(pending_steers, forced, append_assistant=True)
@@ -1332,7 +1392,7 @@ async def run_agent_loop(
         tool_results = [m for m in messages if m.get("role") == "tool"]
         if tool_results:
             logger.info("Forcing synthesis from gathered results.")
-            forced_answer = await _force_answer_from_evidence(messages, provider, scope)
+            forced_answer = await _force_answer_from_evidence(messages, active_provider, scope)
             if forced_answer and not forced_answer.startswith("I have no information"):
                 return f"[{controller.summary()}]\n{forced_answer}"
     return f"Task incomplete ({reason}). {controller.summary()}"

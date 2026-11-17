@@ -792,6 +792,37 @@ class _CpuSampler:
         return {"cpu_pct": cpu_pct, "ram_pct": ram_pct, "battery_pct": battery_pct, "charging": charging}
 
 
+class _ComposerText(tk.Text):
+    """Word-wrapping multi-line composer compatible with tk.Entry index & get helpers."""
+
+    def _norm_idx(self, index: Any) -> str:
+        if isinstance(index, int) and index == 0:
+            return "1.0"
+        if index == "end":
+            return "end-1c"
+        return str(index)
+
+    def get(self, index1: Any = None, index2: Any = None) -> str:  # type: ignore[override]
+        if index1 is None and index2 is None:
+            return super().get("1.0", "end-1c")
+        if index2 is None:
+            return super().get(self._norm_idx(index1))
+        end_idx = "end-1c" if index2 == "end" else self._norm_idx(index2)
+        return super().get(self._norm_idx(index1), end_idx)
+
+    def delete(self, index1: Any, index2: Any = None) -> None:  # type: ignore[override]
+        i1 = "1.0" if (isinstance(index1, int) and index1 == 0) else str(index1)
+        if index2 is None:
+            super().delete(i1)
+        else:
+            i2 = "end" if index2 == "end" else str(index2)
+            super().delete(i1, i2)
+
+    def insert(self, index: Any, chars: str, *args: Any) -> None:  # type: ignore[override]
+        idx = "1.0" if (isinstance(index, int) and index == 0) else str(index)
+        super().insert(idx, chars, *args)
+
+
 class JarvisBridgeClient:
     """Thin synchronous HTTP client connecting the Ultron island to AURA V4 server."""
 
@@ -1143,47 +1174,6 @@ class DynamicIslandPill:
         self.orb_outer = self.orb_canvas.create_oval(7, 7, 47, 47, outline=_PALETTE["accent"], width=1.6)
         self.orb_core = self.orb_canvas.create_oval(23, 23, 31, 31, fill=_PALETTE["accent"], outline="")
 
-        # Expanded-only divider + prominent Model Selector pill button
-        self.exp_div1 = tk.Frame(self.header, width=1, height=30, bg="#394456")
-        self.model_btn = self._mk_btn(
-            self.header,
-            f"◈ {self.active_model_name} ▾",
-            self._open_model_menu,
-            bg=_PALETTE["well"],
-            fg=_PALETTE["arc_text"],
-            hover_bg=_PALETTE["pill_active_bg"],
-            hover_fg="#FFFFFF",
-            padx=5,
-            pady=2,
-            border_color=_PALETTE["arc_border"],
-        )
-        self.exp_div2 = tk.Frame(self.header, width=1, height=30, bg="#394456")
-
-        # Expanded-only Sequential & Sub-Agent Pills bar (@auto @planner @coder @researcher @gmail @calendar)
-        self.hdr_agents_frame = tk.Frame(self.header, bg=_PALETTE["hdr_bar"])
-        for pill_lbl, role_target in _QUICK_AGENTS:
-            pbtn = tk.Button(
-                self.hdr_agents_frame,
-                text=pill_lbl,
-                command=lambda lbl=pill_lbl, rt=role_target: self._on_header_pill_click(lbl, rt),
-                bg=_PALETTE["panel_mid"],
-                fg="#DCE4EE",
-                activebackground=_PALETTE["pill_active_bg"],
-                activeforeground=_PALETTE["arc_text"],
-                relief="flat",
-                bd=0,
-                highlightthickness=1,
-                highlightbackground="#5A667A",
-                font=(_MONO_FONT, 7, "bold"),
-                padx=3,
-                pady=2,
-                cursor="hand2",
-            )
-            pbtn.pack(side="left", padx=1)
-            self._agent_header_pills[pill_lbl] = pbtn
-
-        self.exp_div3 = tk.Frame(self.header, width=1, height=30, bg="#394456")
-
         # Unified Right Header Cluster packed BEFORE expanding middle wave_stack so it is never squeezed at high DPI
         self.hdr_right = tk.Frame(self.header, bg=_PALETTE["gunmetal"])
         self.hdr_right.pack(side="right", padx=(2, 6))
@@ -1239,17 +1229,17 @@ class DynamicIslandPill:
         self.stop_square = self.stop_canvas.create_rectangle(7, 7, 15, 15, fill="#E8EDF4", outline="#E8EDF4")
         self.stop_canvas.bind("<Button-1>", lambda _e: self.stop_active())
 
-        # Packed only in expanded mode (kept compact pill free of clutter)
+        # Packed in top-right corner during expanded mode for instant pause/stop control
         self.hdr_stop_btn = self._mk_btn(
             self.hdr_right,
-            "■ Stop",
+            "⏸ Pause",
             self.stop_active,
             bg=_PALETTE["card_hi"],
             fg=_PALETTE["text"],
             hover_bg=_PALETTE["danger_bg"],
             hover_fg=_PALETTE["danger_fg"],
-            padx=9,
-            pady=3,
+            padx=8,
+            pady=2,
             border_color="#7A899D",
         )
 
@@ -1327,7 +1317,7 @@ class DynamicIslandPill:
         for tab_key, tab_title in (
             ("chat", "Ask Aura"),
             ("agents", "Agents"),
-            ("deck", "Hub & Focus"),
+            ("deck", "Hub"),
         ):
             tbtn = tk.Button(
                 tab_track,
@@ -1358,22 +1348,12 @@ class DynamicIslandPill:
             padx=10,
             pady=3,
             border_color="#5A667A",
-        ).pack(side="left", padx=(0, 8))
+        ).pack(side="left", padx=(0, 6))
 
         self.mode_btn = self._mk_btn(
             tab_track, "RO", self._toggle_mode, bg=_PALETTE["well"], fg=_PALETTE["blue"], padx=9, pady=3, border_color="#485364"
         )
         self.mode_btn.pack(side="left", padx=(0, 4))
-
-        self.voice_btn = self._mk_btn(
-            tab_track, "Voice: Off", self._cycle_persona, bg=_PALETTE["well"], fg=_PALETTE["steel"], padx=9, pady=3, border_color="#485364"
-        )
-        self.voice_btn.pack(side="left", padx=(0, 4))
-
-        self.ollama_btn = self._mk_btn(
-            tab_track, "● Ollama", self._wake_ollama, bg=_PALETTE["well"], fg=_PALETTE["accent"], padx=9, pady=3, border_color="#485364"
-        )
-        self.ollama_btn.pack(side="left", padx=(0, 4))
 
         self.capsule_tel_lbl = tk.Label(
             self.tab_bar,
@@ -1619,18 +1599,17 @@ class DynamicIslandPill:
         gmail_card.grid(row=0, column=0, sticky="nsew", padx=(0, 6), pady=(0, 8))
         g_hdr = tk.Frame(gmail_card, bg=_PALETTE["panel_mid"])
         g_hdr.pack(fill="x", pady=(0, 4))
-        tk.Checkbutton(
-            g_hdr,
-            text="✉  Gmail",
-            variable=self.apps_gmail_var,
-            command=lambda: self._toggle_app_flag("gmail"),
-            bg=_PALETTE["panel_mid"],
-            fg="#E8EDF4",
-            activebackground=_PALETTE["panel_mid"],
-            selectcolor=_PALETTE["cta_bg"],
-            highlightthickness=0,
-            font=(_UI_FONT, 10, "bold"),
+        tk.Label(
+            g_hdr, text="✉  Gmail", bg=_PALETTE["panel_mid"], fg="#E8EDF4", font=(_UI_FONT, 10, "bold")
         ).pack(side="left")
+        self._apps_gmail_sw = tk.Canvas(
+            g_hdr, width=44, height=24, bg=_PALETTE["panel_mid"], highlightthickness=0, cursor="hand2"
+        )
+        self._apps_gmail_sw.pack(side="right", padx=(4, 0))
+        self._apps_gmail_sw.bind("<Button-1>", lambda _e: self._on_app_switch_click("gmail"))
+        self._img_refs["app_gmail_sw"] = self._draw_switch(
+            self._apps_gmail_sw, active=bool(self.apps_gmail_var.get()), bg_hex=_PALETTE["panel_mid"]
+        )
         self.apps_gmail_state_lbl = tk.Label(
             g_hdr,
             text="Off",
@@ -1640,7 +1619,7 @@ class DynamicIslandPill:
             padx=6,
             pady=1,
         )
-        self.apps_gmail_state_lbl.pack(side="right")
+        self.apps_gmail_state_lbl.pack(side="right", padx=(4, 4))
         tk.Label(
             gmail_card,
             text="Read unread mail, search threads & compose replies via IMAP/SMTP.",
@@ -1682,18 +1661,17 @@ class DynamicIslandPill:
         cal_card.grid(row=0, column=1, sticky="nsew", padx=(6, 0), pady=(0, 8))
         c_hdr = tk.Frame(cal_card, bg=_PALETTE["panel_mid"])
         c_hdr.pack(fill="x", pady=(0, 4))
-        tk.Checkbutton(
-            c_hdr,
-            text="📅  Google Calendar",
-            variable=self.apps_cal_var,
-            command=lambda: self._toggle_app_flag("calendar"),
-            bg=_PALETTE["panel_mid"],
-            fg="#E8EDF4",
-            activebackground=_PALETTE["panel_mid"],
-            selectcolor=_PALETTE["cta_bg"],
-            highlightthickness=0,
-            font=(_UI_FONT, 10, "bold"),
+        tk.Label(
+            c_hdr, text="📅  Google Calendar", bg=_PALETTE["panel_mid"], fg="#E8EDF4", font=(_UI_FONT, 10, "bold")
         ).pack(side="left")
+        self._apps_cal_sw = tk.Canvas(
+            c_hdr, width=44, height=24, bg=_PALETTE["panel_mid"], highlightthickness=0, cursor="hand2"
+        )
+        self._apps_cal_sw.pack(side="right", padx=(4, 0))
+        self._apps_cal_sw.bind("<Button-1>", lambda _e: self._on_app_switch_click("calendar"))
+        self._img_refs["app_cal_sw"] = self._draw_switch(
+            self._apps_cal_sw, active=bool(self.apps_cal_var.get()), bg_hex=_PALETTE["panel_mid"]
+        )
         self.apps_cal_state_lbl = tk.Label(
             c_hdr,
             text="Local",
@@ -1703,7 +1681,7 @@ class DynamicIslandPill:
             padx=6,
             pady=1,
         )
-        self.apps_cal_state_lbl.pack(side="right")
+        self.apps_cal_state_lbl.pack(side="right", padx=(4, 4))
         tk.Label(
             cal_card,
             text="Sync daily briefings & agenda from private iCal (.ics) feed or local events.",
@@ -1757,9 +1735,16 @@ class DynamicIslandPill:
         tk.Label(
             bh, text="🌐  Browser & Research MCP", bg=_PALETTE["panel_mid"], fg="#E8EDF4", font=(_UI_FONT, 10, "bold")
         ).pack(side="left")
+        self._apps_browser_sw = tk.Canvas(
+            bh, width=44, height=24, bg=_PALETTE["panel_mid"], highlightthickness=0, cursor="hand2"
+        )
+        self._apps_browser_sw.pack(side="right", padx=(4, 0))
+        self._img_refs["app_browser_sw"] = self._draw_switch(
+            self._apps_browser_sw, active=True, bg_hex=_PALETTE["panel_mid"]
+        )
         tk.Label(
-            bh, text="● Active · 17 tools", bg=_PALETTE["well"], fg=_PALETTE["accent"], font=(_MONO_FONT, 8, "bold"), padx=6, pady=1
-        ).pack(side="right")
+            bh, text="17 tools", bg=_PALETTE["well"], fg=_PALETTE["accent"], font=(_MONO_FONT, 8, "bold"), padx=6, pady=1
+        ).pack(side="right", padx=(4, 4))
         tk.Label(
             browser_card,
             text="Instant Chrome/web opens, compact [e1] DOM automation & safe DuckDuckGo research.",
@@ -1796,9 +1781,16 @@ class DynamicIslandPill:
         tk.Label(
             sh, text="🖥  Desktop Vision & Cloud APIs", bg=_PALETTE["panel_mid"], fg="#E8EDF4", font=(_UI_FONT, 10, "bold")
         ).pack(side="left")
+        self._apps_sys_sw = tk.Canvas(
+            sh, width=44, height=24, bg=_PALETTE["panel_mid"], highlightthickness=0, cursor="hand2"
+        )
+        self._apps_sys_sw.pack(side="right", padx=(4, 0))
+        self._img_refs["app_sys_sw"] = self._draw_switch(
+            self._apps_sys_sw, active=True, bg_hex=_PALETTE["panel_mid"]
+        )
         tk.Label(
-            sh, text="● Active · 37 MCP tools", bg=_PALETTE["well"], fg=_PALETTE["accent"], font=(_MONO_FONT, 8, "bold"), padx=6, pady=1
-        ).pack(side="right")
+            sh, text="37 MCP tools", bg=_PALETTE["well"], fg=_PALETTE["accent"], font=(_MONO_FONT, 8, "bold"), padx=6, pady=1
+        ).pack(side="right", padx=(4, 4))
         self._apps_cloud_lbl = tk.Label(
             sys_card,
             text="Desktop/Filesystem/Git MCP ready · Configure Cloud providers in Web UI.",
@@ -1907,9 +1899,25 @@ class DynamicIslandPill:
         g = apps.get("gmail") or {}
         c = apps.get("calendar") or {}
         if hasattr(self, "apps_gmail_var"):
-            self.apps_gmail_var.set(bool(g.get("enabled", True)))
+            g_en = bool(g.get("enabled", True))
+            self.apps_gmail_var.set(g_en)
+            if hasattr(self, "_apps_gmail_sw"):
+                self._img_refs["app_gmail_sw"] = self._draw_switch(
+                    self._apps_gmail_sw, active=g_en, bg_hex=_PALETTE["panel_mid"]
+                )
         if hasattr(self, "apps_cal_var"):
-            self.apps_cal_var.set(bool(c.get("enabled", True)))
+            c_en = bool(c.get("enabled", True))
+            self.apps_cal_var.set(c_en)
+            if hasattr(self, "_apps_cal_sw"):
+                self._img_refs["app_cal_sw"] = self._draw_switch(
+                    self._apps_cal_sw, active=c_en, bg_hex=_PALETTE["panel_mid"]
+                )
+        if hasattr(self, "_rail_apps_lbl"):
+            parts = [
+                f"Gmail: {'On' if g.get('connected') else ('Off' if not g.get('enabled', True) else 'Setup')}",
+                f"Cal: {'On' if c.get('connected') else ('Off' if not c.get('enabled', True) else 'Local')}",
+            ]
+            self._rail_apps_lbl.configure(text=" · ".join(parts))
         if hasattr(self, "apps_gmail_state_lbl"):
             self.apps_gmail_state_lbl.configure(
                 text=f"● Connected ({g.get('account') or 'ready'})" if g.get("connected") else ("Paused" if g.get("configured") else "Setup Needed"),
@@ -1927,6 +1935,23 @@ class DynamicIslandPill:
         if hasattr(self, "apps_btn"):
             n = int(bool(g.get("connected"))) + int(bool(c.get("connected")))
             self.apps_btn.configure(text=f"⊞ Apps · {n}" if n else "⊞ Apps")
+
+    def _on_app_switch_click(self, kind: str) -> None:
+        if kind == "gmail" and hasattr(self, "apps_gmail_var"):
+            new_val = not bool(self.apps_gmail_var.get())
+            self.apps_gmail_var.set(new_val)
+            if hasattr(self, "_apps_gmail_sw"):
+                self._img_refs["app_gmail_sw"] = self._draw_switch(
+                    self._apps_gmail_sw, active=new_val, bg_hex=_PALETTE["panel_mid"]
+                )
+        elif kind == "calendar" and hasattr(self, "apps_cal_var"):
+            new_val = not bool(self.apps_cal_var.get())
+            self.apps_cal_var.set(new_val)
+            if hasattr(self, "_apps_cal_sw"):
+                self._img_refs["app_cal_sw"] = self._draw_switch(
+                    self._apps_cal_sw, active=new_val, bg_hex=_PALETTE["panel_mid"]
+                )
+        self._toggle_app_flag(kind)
 
     def _toggle_app_flag(self, kind: str) -> None:
         payload = (
@@ -2472,16 +2497,12 @@ class DynamicIslandPill:
     def _build_chat_panel(self) -> None:
         self.chat_panel = tk.Frame(self.panel_host, bg=_PALETTE["bg"])
 
-        # Right Column (Agenda + interactive Todos) & Middle Column (Executive Summary + Gmail)
-        right_col = tk.Frame(self.chat_panel, bg=_PALETTE["bg"], width=238)
+        # Slim Right Utility Rail (compact Todos + Apps launcher + Agent Pipeline status)
+        right_col = tk.Frame(self.chat_panel, bg=_PALETTE["bg"], width=224)
         right_col.pack(side="right", fill="y", padx=(8, 0))
         right_col.pack_propagate(False)
 
-        mid_col = tk.Frame(self.chat_panel, bg=_PALETTE["bg"], width=232)
-        mid_col.pack(side="right", fill="y", padx=(8, 0))
-        mid_col.pack_propagate(False)
-
-        # Left Column (Chat Well #14171C + Omni Composer)
+        # Spacious Main Chat & Multi-line Composer Column
         left_col = tk.Frame(
             self.chat_panel,
             bg=_PALETTE["well"],
@@ -2490,7 +2511,7 @@ class DynamicIslandPill:
         )
         left_col.pack(side="left", fill="both", expand=True)
 
-        # Collapsible Reasoning Steps Header
+        # Compact Collapsible Reasoning Steps Header
         rs_wrap = tk.Frame(
             left_col,
             bg=_PALETTE["card"],
@@ -2511,28 +2532,11 @@ class DynamicIslandPill:
             bd=0,
             font=(_UI_FONT, 9, "bold"),
             padx=10,
-            pady=5,
+            pady=4,
             cursor="hand2",
             anchor="w",
         )
         self.reasoning_btn.pack(side="left", fill="x", expand=True)
-
-        self.agent_btn = tk.Button(
-            rs_wrap,
-            text="✦ Auto ▾",
-            command=self._open_agent_menu,
-            bg=_PALETTE["well"],
-            fg=_PALETTE["accent"],
-            activebackground=_PALETTE["pill_active_bg"],
-            activeforeground="#FFFFFF",
-            relief="flat",
-            bd=0,
-            font=(_UI_FONT, 9, "bold"),
-            padx=8,
-            pady=3,
-            cursor="hand2",
-        )
-        self.agent_btn.pack(side="right", padx=(4, 6), pady=4)
 
         self.tools_called_badge = tk.Label(
             rs_wrap,
@@ -2540,10 +2544,10 @@ class DynamicIslandPill:
             bg=_PALETTE["well"],
             fg=_PALETTE["arc_text"],
             font=(_MONO_FONT, 8, "bold"),
-            padx=9,
-            pady=3,
+            padx=8,
+            pady=2,
         )
-        self.tools_called_badge.pack(side="right", padx=(4, 2), pady=4)
+        self.tools_called_badge.pack(side="right", padx=(4, 6), pady=3)
 
         self.reasoning_detail_lbl = tk.Label(
             left_col,
@@ -2553,12 +2557,12 @@ class DynamicIslandPill:
             font=(_MONO_FONT, 8),
             anchor="w",
             justify="left",
-            wraplength=500,
+            wraplength=640,
             padx=12,
             pady=5,
         )
 
-        # Omni Composer (packed BOTTOM so transcript never pushes it below expanded card height)
+        # Spacious Multi-line Word-Wrapping Composer (bottom-anchored so it never clips)
         self.input_row = tk.Frame(
             left_col,
             bg=_PALETTE["panel_mid"],
@@ -2568,56 +2572,69 @@ class DynamicIslandPill:
         self.input_row.pack(side="bottom", fill="x", padx=10, pady=(4, 8))
 
         entry_top = tk.Frame(self.input_row, bg=_PALETTE["panel_mid"])
-        entry_top.pack(fill="x", padx=10, pady=(7, 3))
+        entry_top.pack(fill="x", padx=10, pady=(8, 4))
 
-        self.entry = tk.Entry(
+        self.entry = _ComposerText(
             entry_top,
+            height=3,
+            wrap="word",
             bg=_PALETTE["panel_mid"],
             fg=_PALETTE["muted"],
             insertbackground="#FFFFFF",
             relief="flat",
             bd=0,
+            undo=True,
             font=(_UI_FONT, 10),
         )
-        self.entry.pack(side="left", fill="x", expand=True, padx=(2, 6), pady=2)
+        self.entry.pack(side="left", fill="x", expand=True, padx=(2, 2))
         self.entry.insert(0, _PLACEHOLDER)
         self.entry.bind("<Button-1>", self._focus_entry)
         self.entry.bind("<FocusIn>", self._clear_placeholder)
         self.entry.bind("<KeyPress>", self._on_entry_key)
+        self.entry.bind("<KeyRelease>", lambda _e: self._sync_composer_height())
         self.entry.bind("<FocusOut>", self._restore_placeholder)
-        self.entry.bind("<Return>", lambda _e: self._submit())
+        self.entry.bind("<Return>", self._on_composer_return)
+        self.entry.bind("<Shift-Return>", lambda _e: None)
         self.input_row.bind("<Button-1>", self._focus_entry)
 
-        self.composer_stop_btn = self._mk_btn(
-            entry_top,
-            "■ Stop Aura",
-            self.stop_active,
-            bg=_PALETTE["gunmetal"],
-            fg=_PALETTE["steel"],
-            hover_bg=_PALETTE["danger_bg"],
-            hover_fg=_PALETTE["danger_fg"],
-            padx=8,
-            pady=2,
-            border_color="#5A667A",
-        )
-        self.composer_stop_btn.pack(side="right", padx=(4, 0))
-
-        self.mic_btn = self._mk_btn(
-            entry_top,
-            "🎙 Mic",
-            self.toggle_mic,
-            bg=_PALETTE["gunmetal"],
-            fg=_PALETTE["steel"],
-            hover_bg=_PALETTE["titanium"],
-            hover_fg=_PALETTE["accent"],
-            padx=8,
-            pady=2,
-            border_color="#5A667A",
-        )
-        self.mic_btn.pack(side="right")
-
+        # Clean Antigravity/ChatGPT-style Composer Toolbar:
+        # Left: Model selector (up/down) + Agent role picker + Tools + Attach
+        # Right: Mic + Pause + Send
         chips_row = tk.Frame(self.input_row, bg=_PALETTE["panel_mid"])
         chips_row.pack(fill="x", padx=8, pady=(2, 7))
+
+        self.model_btn = self._mk_btn(
+            chips_row,
+            f"⌃ {self.active_model_name} ▾",
+            self._open_model_menu,
+            bg=_PALETTE["well"],
+            fg=_PALETTE["arc_text"],
+            hover_bg=_PALETTE["pill_active_bg"],
+            hover_fg="#FFFFFF",
+            padx=7,
+            pady=2,
+            border_color=_PALETTE["arc_border"],
+        )
+        self.model_btn.pack(side="left", padx=(0, 4))
+
+        self.agent_btn = tk.Button(
+            chips_row,
+            text="✦ Auto ▾",
+            command=self._open_agent_menu,
+            bg=_PALETTE["well"],
+            fg=_PALETTE["accent"],
+            activebackground=_PALETTE["pill_active_bg"],
+            activeforeground="#FFFFFF",
+            relief="flat",
+            bd=0,
+            highlightthickness=1,
+            highlightbackground="#5A667A",
+            font=(_UI_FONT, 8, "bold"),
+            padx=7,
+            pady=2,
+            cursor="hand2",
+        )
+        self.agent_btn.pack(side="left", padx=(0, 4))
 
         self.tools_btn = self._mk_btn(
             chips_row,
@@ -2633,25 +2650,18 @@ class DynamicIslandPill:
         self.tools_btn.bind("<Leave>", self._on_tools_leave, add="+")
         self.tools_btn.pack(side="left", padx=(0, 3))
 
-        for c_lbl, c_cmd in (
-            ("DeepSearch", lambda: self._run_quick("research online about ")),
-            ("Think", lambda: self._run_quick("@planner analyze step-by-step: ")),
-            ("Screen", lambda: self._run_quick("what is on my screen?")),
-            ("Git", lambda: self._run_quick("git status")),
-            ("Attach", self._attach_file_path),
-        ):
-            self._mk_btn(
-                chips_row,
-                c_lbl,
-                c_cmd,
-                bg=_PALETTE["card"],
-                fg="#DCE4EE",
-                hover_bg=_PALETTE["card_hi"],
-                hover_fg=_PALETTE["arc_text"],
-                padx=4,
-                pady=2,
-                border_color="#5A667A",
-            ).pack(side="left", padx=(0, 2))
+        self._mk_btn(
+            chips_row,
+            "+ Attach",
+            self._attach_file_path,
+            bg=_PALETTE["card"],
+            fg="#DCE4EE",
+            hover_bg=_PALETTE["card_hi"],
+            hover_fg=_PALETTE["arc_text"],
+            padx=6,
+            pady=2,
+            border_color="#5A667A",
+        ).pack(side="left", padx=(0, 3))
 
         self.send_btn = self._mk_btn(
             chips_row,
@@ -2667,11 +2677,39 @@ class DynamicIslandPill:
         )
         self.send_btn.pack(side="right")
 
-        # Chat Response Well
+        self.composer_stop_btn = self._mk_btn(
+            chips_row,
+            "⏸ Pause",
+            self.stop_active,
+            bg=_PALETTE["gunmetal"],
+            fg=_PALETTE["steel"],
+            hover_bg=_PALETTE["danger_bg"],
+            hover_fg=_PALETTE["danger_fg"],
+            padx=7,
+            pady=2,
+            border_color="#5A667A",
+        )
+        self.composer_stop_btn.pack(side="right", padx=(0, 4))
+
+        self.mic_btn = self._mk_btn(
+            chips_row,
+            "🎙 Mic",
+            self.toggle_mic,
+            bg=_PALETTE["gunmetal"],
+            fg=_PALETTE["steel"],
+            hover_bg=_PALETTE["titanium"],
+            hover_fg=_PALETTE["accent"],
+            padx=7,
+            pady=2,
+            border_color="#5A667A",
+        )
+        self.mic_btn.pack(side="right", padx=(0, 4))
+
+        # Spacious Chat Response Well
         self.output = tk.Text(
             left_col,
             wrap="word",
-            height=8,
+            height=9,
             bg=_PALETTE["well"],
             fg=_PALETTE["text"],
             insertbackground="#FFFFFF",
@@ -2698,107 +2736,12 @@ class DynamicIslandPill:
         self.output.tag_configure("err_body", foreground=_PALETTE["danger_fg"], font=(_UI_FONT, 10))
         self.output.insert(
             "end",
-            "◈ AURA  Ready in vibranium Ultron HUD — pick @auto/@planner/@coder, speak, or tap Summarize my day.\n",
+            "◈ AURA Ready — pick model bottom-left, @agent beside it, or type freely.\n",
             "welcome",
         )
         self.output.configure(state="disabled")
 
-        # --- Middle Column: Executive Summary + Gmail ---
-        sum_card = tk.Frame(
-            mid_col,
-            bg=_PALETTE["card"],
-            highlightbackground="#627185",
-            highlightthickness=1,
-        )
-        sum_card.pack(side="top", fill="x", pady=(0, 8))
-
-        self._build_section_header(sum_card, "EXECUTIVE SUMMARY")
-
-        self._mk_btn(
-            sum_card,
-            "Summarize my day",
-            lambda: self._run_quick("morning briefing"),
-            bg=_PALETTE["cta_bg"],
-            fg="#F2F8FF",
-            hover_bg=_PALETTE["cta_hover"],
-            hover_fg="#FFFFFF",
-            padx=12,
-            pady=6,
-            border_color=_PALETTE["arc_border"],
-        ).pack(fill="x", padx=12, pady=(2, 8))
-
-        tk.Label(
-            sum_card,
-            text="LIVE BRIEFING",
-            bg=_PALETTE["card"],
-            fg=_PALETTE["muted"],
-            font=(_UI_FONT, 8, "bold"),
-            anchor="w",
-        ).pack(fill="x", padx=12, pady=(0, 3))
-
-        self.briefing_list_frame = tk.Frame(sum_card, bg=_PALETTE["card"])
-        self.briefing_list_frame.pack(fill="x", padx=12, pady=(0, 6))
-        self._render_briefing(["No workspace summary synced yet."])
-
-        gmail_card = tk.Frame(
-            mid_col,
-            bg=_PALETTE["panel_mid"],
-            highlightbackground="#556173",
-            highlightthickness=1,
-        )
-        gmail_card.pack(fill="both", expand=True)
-        self._build_section_header(gmail_card, "GMAIL", right_btn=("Inbox", lambda: self._run_quick("check my unread emails")))
-
-        self.gmail_list_frame = tk.Frame(gmail_card, bg=_PALETTE["panel_mid"])
-        self.gmail_list_frame.pack(fill="both", expand=True, padx=12, pady=(0, 8))
-        self._render_gmail([])
-
-        # --- Right Column: Agenda + Interactive Todos + Live Agent Progress ---
-        agenda_card = tk.Frame(
-            right_col,
-            bg=_PALETTE["panel_mid"],
-            highlightbackground="#556173",
-            highlightthickness=1,
-        )
-        agenda_card.pack(side="top", fill="x", pady=(0, 8))
-        now = datetime.now()
-        self._build_section_header(
-            agenda_card,
-            "AGENDA",
-            right_text=now.strftime("%a %d %b"),
-            right_btn=("Cal", self._toggle_agenda_calendar),
-        )
-
-        self.agenda_list_frame = tk.Frame(agenda_card, bg=_PALETTE["panel_mid"])
-        self.agenda_list_frame.pack(fill="x", padx=12, pady=(0, 6))
-        self._render_agenda([])
-
-        # Optional collapsible Monthly Calendar inside Agenda card
-        self.agenda_cal_frame = tk.Frame(agenda_card, bg=_PALETTE["well"])
-        for col_idx, wd in enumerate(("M", "T", "W", "T", "F", "S", "S")):
-            self.agenda_cal_frame.columnconfigure(col_idx, weight=1)
-            tk.Label(
-                self.agenda_cal_frame, text=wd, bg=_PALETTE["well"], fg=_PALETTE["muted"], font=(_MONO_FONT, 8, "bold")
-            ).grid(row=0, column=col_idx, pady=(2, 2))
-        for r_idx, week in enumerate(calendar.monthcalendar(now.year, now.month), start=1):
-            for c_idx, day in enumerate(week):
-                if day == 0:
-                    continue
-                is_today = day == now.day
-                day_lbl = tk.Label(
-                    self.agenda_cal_frame,
-                    text=str(day),
-                    bg=_PALETTE["cta_bg"] if is_today else _PALETTE["well"],
-                    fg="#F2F8FF" if is_today else _PALETTE["steel"],
-                    font=(_MONO_FONT, 8, "bold" if is_today else "normal"),
-                    width=2,
-                    cursor="hand2",
-                )
-                day_lbl.grid(row=r_idx, column=c_idx, padx=1, pady=1)
-                date_str = f"{now.strftime('%B')} {day}, {now.year}"
-                day_lbl.bind("<Button-1>", lambda _e, ds=date_str: self._run_quick(f"check my calendar for {ds}"))
-
-        # Interactive Todos Card + Live Active Agent & Completion Progress below Todos
+        # --- Slim Right Rail: Todos + Apps + Live Agent Progress ---
         todos_card = tk.Frame(
             right_col,
             bg=_PALETTE["panel_mid"],
@@ -2808,9 +2751,9 @@ class DynamicIslandPill:
         todos_card.pack(fill="both", expand=True)
 
         todo_hdr = tk.Frame(todos_card, bg=_PALETTE["panel_mid"])
-        todo_hdr.pack(fill="x", padx=12, pady=(8, 4))
+        todo_hdr.pack(fill="x", padx=10, pady=(8, 4))
         tk.Label(todo_hdr, text="◆", bg=_PALETTE["panel_mid"], fg=_PALETTE["accent"], font=(_UI_FONT, 9)).pack(
-            side="left", padx=(0, 6)
+            side="left", padx=(0, 5)
         )
         tk.Label(
             todo_hdr, text="TODOS", bg=_PALETTE["panel_mid"], fg="#E8EDF4", font=(_TECH_FONT, 9, "bold")
@@ -2823,16 +2766,16 @@ class DynamicIslandPill:
         self.todo_prog_canvas = tk.Canvas(
             todos_card, height=5, bg=_PALETTE["well"], highlightthickness=0
         )
-        self.todo_prog_canvas.pack(fill="x", padx=12, pady=(0, 6))
+        self.todo_prog_canvas.pack(fill="x", padx=10, pady=(0, 6))
         self._todo_prog_fill = self.todo_prog_canvas.create_rectangle(0, 0, 0, 5, fill=_PALETTE["accent"], outline="")
 
         self.todo_list_frame = tk.Frame(todos_card, bg=_PALETTE["panel_mid"])
-        self.todo_list_frame.pack(fill="x", padx=10, pady=(0, 4))
+        self.todo_list_frame.pack(fill="x", padx=8, pady=(0, 4))
         self._todo_vars = []
         self._render_todos(self._todo_items)
 
         todo_add_row = tk.Frame(todos_card, bg=_PALETTE["panel_mid"])
-        todo_add_row.pack(fill="x", padx=12, pady=(2, 4))
+        todo_add_row.pack(fill="x", padx=10, pady=(2, 4))
         self.todo_add_entry = tk.Entry(
             todo_add_row,
             bg=_PALETTE["well"],
@@ -2849,21 +2792,51 @@ class DynamicIslandPill:
             self._add_todo_item,
             bg=_PALETTE["card_hi"],
             fg="#DCE4EE",
-            padx=8,
+            padx=7,
             pady=1,
             border_color="#67758A",
         ).pack(side="right")
 
-        # Divider + Active Agent Execution & Completion Progress under Todos
-        tk.Frame(todos_card, height=1, bg="#465163").pack(fill="x", padx=12, pady=(8, 6))
+        # Compact Apps Launcher inside Right Rail (Gmail / Calendar toggle card)
+        tk.Frame(todos_card, height=1, bg="#465163").pack(fill="x", padx=10, pady=(6, 6))
+        apps_rail_hdr = tk.Frame(todos_card, bg=_PALETTE["panel_mid"])
+        apps_rail_hdr.pack(fill="x", padx=10, pady=(0, 2))
+        tk.Label(apps_rail_hdr, text="◆", bg=_PALETTE["panel_mid"], fg=_PALETTE["accent"], font=(_UI_FONT, 8)).pack(
+            side="left", padx=(0, 5)
+        )
+        tk.Label(
+            apps_rail_hdr, text="APPS", bg=_PALETTE["panel_mid"], fg="#E8EDF4", font=(_TECH_FONT, 8, "bold")
+        ).pack(side="left")
+        self._mk_btn(
+            apps_rail_hdr,
+            "Toggle Apps ↗",
+            self._open_apps_popover,
+            bg=_PALETTE["well"],
+            fg=_PALETTE["arc_text"],
+            padx=6,
+            pady=1,
+            border_color="#485364",
+        ).pack(side="right")
+        self._rail_apps_lbl = tk.Label(
+            todos_card,
+            text="Gmail: Setup · Cal: Local",
+            bg=_PALETTE["panel_mid"],
+            fg=_PALETTE["muted"],
+            font=(_MONO_FONT, 8),
+            anchor="w",
+        )
+        self._rail_apps_lbl.pack(fill="x", padx=10, pady=(0, 4))
+
+        # Divider + Active Agent Execution & Completion Progress under Apps
+        tk.Frame(todos_card, height=1, bg="#465163").pack(fill="x", padx=10, pady=(4, 6))
 
         ap_hdr = tk.Frame(todos_card, bg=_PALETTE["panel_mid"])
-        ap_hdr.pack(fill="x", padx=12, pady=(0, 2))
+        ap_hdr.pack(fill="x", padx=10, pady=(0, 2))
         tk.Label(ap_hdr, text="◆", bg=_PALETTE["panel_mid"], fg=_PALETTE["accent"], font=(_UI_FONT, 8)).pack(
             side="left", padx=(0, 5)
         )
         tk.Label(
-            ap_hdr, text="AGENT PIPELINE", bg=_PALETTE["panel_mid"], fg="#E8EDF4", font=(_TECH_FONT, 8, "bold")
+            ap_hdr, text="AGENT", bg=_PALETTE["panel_mid"], fg="#E8EDF4", font=(_TECH_FONT, 8, "bold")
         ).pack(side="left")
         self.agent_prog_pct_lbl = tk.Label(
             ap_hdr, text="Ready · 0%", bg=_PALETTE["panel_mid"], fg=_PALETTE["arc_text"], font=(_MONO_FONT, 8, "bold")
@@ -2878,12 +2851,12 @@ class DynamicIslandPill:
             font=(_UI_FONT, 8, "bold"),
             anchor="w",
         )
-        self.agent_status_lbl.pack(fill="x", padx=12, pady=(0, 4))
+        self.agent_status_lbl.pack(fill="x", padx=10, pady=(0, 4))
 
         self.agent_prog_canvas = tk.Canvas(
             todos_card, height=6, bg=_PALETTE["well"], highlightthickness=0
         )
-        self.agent_prog_canvas.pack(fill="x", padx=12, pady=(0, 8))
+        self.agent_prog_canvas.pack(fill="x", padx=10, pady=(0, 8))
         self._agent_prog_fill = self.agent_prog_canvas.create_rectangle(
             0, 0, 12, 6, fill=_PALETTE["accent"], outline=""
         )
@@ -3209,13 +3182,34 @@ class DynamicIslandPill:
     def _open_tools_menu(self) -> None:
         self._toggle_tools_popover()
 
+    def _on_composer_return(self, event: tk.Event[Any] | None = None) -> str:
+        if event is not None and (getattr(event, "state", 0) & 0x0001):
+            return ""
+        self._submit()
+        return "break"
+
+    def _sync_composer_height(self) -> None:
+        if not hasattr(self, "entry") or getattr(self, "_has_placeholder", False):
+            if hasattr(self, "entry"):
+                try:
+                    self.entry.configure(height=3)
+                except Exception:
+                    pass
+            return
+        try:
+            dlines = self.entry.count("1.0", "end", "displaylines")
+            n_lines = int(dlines[0]) if isinstance(dlines, tuple) and dlines else int(dlines or 1)
+            self.entry.configure(height=max(3, min(5, n_lines)))
+        except Exception:
+            pass
+
     def _open_agent_menu(self) -> None:
         self._close_model_popover()
         self._close_tools_popover()
         self._popup_open = True
         try:
             bx = self.agent_btn.winfo_rootx()
-            by = self.agent_btn.winfo_rooty() + max(24, self.agent_btn.winfo_height() + 2)
+            by = max(40, self.agent_btn.winfo_rooty() - 180)
             self.agent_menu.tk_popup(bx, by)
         finally:
             self._popup_open = False
@@ -3235,10 +3229,17 @@ class DynamicIslandPill:
             self._populate_model_popover()
             self._model_popover_visible = True
             try:
-                bx = max(12, self.model_btn.winfo_rootx() - self.frame.winfo_rootx())
+                self.frame.update_idletasks()
+                self.model_popover.update_idletasks()
+                pop_w = max(210, self.model_popover.winfo_reqwidth() or 230)
+                pop_h = max(120, self.model_popover.winfo_reqheight() or 210)
+                fw = max(480, self.frame.winfo_width() or 960)
+                bx = max(12, min(self.model_btn.winfo_rootx() - self.frame.winfo_rootx(), fw - pop_w - 12))
+                btn_top = self.model_btn.winfo_rooty() - self.frame.winfo_rooty()
+                by = max(58, btn_top - pop_h - 4)
             except Exception:
-                bx = 76
-            self.model_popover.place(in_=self.frame, x=bx, y=64)
+                bx, by = 14, 180
+            self.model_popover.place(in_=self.frame, x=bx, y=by)
             self.model_popover.lift()
             return
         self._popup_open = True
@@ -3902,11 +3903,6 @@ class DynamicIslandPill:
             self.drawer.pack_forget()
         self.header.pack_forget()
         self.brow_canvas.pack_forget()
-        self.exp_div1.pack_forget()
-        self.model_btn.pack_forget()
-        self.exp_div2.pack_forget()
-        self.hdr_agents_frame.pack_forget()
-        self.exp_div3.pack_forget()
         self.pill_label.pack_forget()
         self.compact_voice_btn.pack_forget()
         self.mic_lbl_hdr.pack_forget()
@@ -3926,32 +3922,27 @@ class DynamicIslandPill:
             self.island_state = "expanded"
             self.frame.configure(bg=_PALETTE["bg"], highlightthickness=0)
             self.brow_canvas.pack(side="top", fill="x", padx=4)
-            self.header.configure(bg=_PALETTE["hdr_bar"], height=56, highlightthickness=1)
-            self.orb_canvas.configure(bg=_PALETTE["hdr_bar"], width=42, height=42)
-            self.orb_canvas.pack_configure(padx=(4, 2))
+            self.header.configure(bg=_PALETTE["hdr_bar"], height=52, highlightthickness=1)
+            self.orb_canvas.configure(bg=_PALETTE["hdr_bar"], width=40, height=40)
+            self.orb_canvas.pack_configure(padx=(6, 4))
             self.wave_stack.configure(bg=_PALETTE["hdr_bar"])
-            self.wave_canvas.configure(bg=_PALETTE["hdr_bar"], width=68, height=28)
+            self.wave_canvas.configure(bg=_PALETTE["hdr_bar"], width=120, height=28)
             self.hdr_right.configure(bg=_PALETTE["hdr_bar"])
-            self.hdr_right.pack_configure(padx=(2, 6))
+            self.hdr_right.pack_configure(padx=(4, 8))
             self.mic_lbl_hdr.configure(bg=_PALETTE["hdr_bar"])
             self.capsule_mic_btn.configure(bg=_PALETTE["hdr_bar"])
             self.stop_canvas.configure(bg=_PALETTE["hdr_bar"])
             if self._orb_eye_item and self._img_refs.get("eye_expanded") is not None:
-                self.orb_canvas.coords(self._orb_eye_item, 21, 21)
+                self.orb_canvas.coords(self._orb_eye_item, 20, 20)
                 self.orb_canvas.itemconfigure(self._orb_eye_item, image=self._img_refs["eye_expanded"])
             self.header.pack(side="top", fill="x", padx=8, pady=(1, 4))
-            self.exp_div1.pack(side="left", padx=2, after=self.orb_canvas)
-            self.model_btn.configure(bg=_PALETTE["well"])
-            self.model_btn.pack(side="left", padx=1, after=self.exp_div1)
-            self.exp_div2.pack(side="left", padx=2, after=self.model_btn)
-            self.hdr_agents_frame.pack(side="left", padx=1, after=self.exp_div2)
-            self.exp_div3.pack(side="left", padx=2, after=self.hdr_agents_frame)
             self.pill_label.pack(side="bottom", pady=(0, 2))
             self.shutdown_btn.configure(text="⏻ Off", padx=6, pady=2)
-            self.shutdown_btn.pack(side="right", padx=(3, 0))
+            self.shutdown_btn.pack(side="right", padx=(4, 0))
+            self.shutter_btn.pack(side="right", padx=(4, 0))
+            self.hdr_stop_btn.pack(side="right", padx=(4, 0))
+            self.apps_btn.pack(side="right", padx=(4, 0))
             self.mic_lbl_hdr.pack(side="left", padx=(0, 3), before=self.capsule_mic_btn)
-            self.apps_btn.pack(side="left", padx=(0, 3))
-            self.shutter_btn.pack(side="left", padx=(0, 0))
             if not defer_drawer:
                 self.drawer.pack(fill="both", expand=True)
         else:
@@ -4330,8 +4321,8 @@ class DynamicIslandPill:
             if str(self.active_model_name).startswith("cloud:")
             else self.active_model_name
         )
-        short_m = disp_m if len(disp_m) <= 18 else f"{disp_m[:17]}…"
-        self.model_btn.configure(text=f"◈ {short_m} ▾")
+        short_m = disp_m if len(disp_m) <= 20 else f"{disp_m[:19]}…"
+        self.model_btn.configure(text=f"⌃ {short_m} ▾")
 
         status_txt = self.state_label
         if status_txt == "AURA Jarvis":
@@ -4341,17 +4332,19 @@ class DynamicIslandPill:
             text="RO" if self.read_only else "RW",
             fg=_PALETTE["blue"] if self.read_only else _PALETTE["amber"],
         )
-        self.voice_btn.configure(text=_PERSONA_LABELS.get(self.persona, "Voice: Off"))
+        if hasattr(self, "voice_btn"):
+            self.voice_btn.configure(text=_PERSONA_LABELS.get(self.persona, "Voice: Off"))
         if hasattr(self, "compact_voice_btn"):
             vshort = {"jarvis": "🔊 J", "ultron": "🔊 U", "megatron": "🔊 M"}.get(self.persona, "🔇")
             self.compact_voice_btn.configure(
                 text=vshort,
                 fg=_PALETTE["accent"] if self.persona != "off" else _PALETTE["muted"],
             )
-        self.ollama_btn.configure(
-            text="● Ollama" if self.ollama_up else "● Start Ollama",
-            fg=_PALETTE["accent"] if self.ollama_up else _PALETTE["amber"],
-        )
+        if hasattr(self, "ollama_btn"):
+            self.ollama_btn.configure(
+                text="● Ollama" if self.ollama_up else "● Start Ollama",
+                fg=_PALETTE["accent"] if self.ollama_up else _PALETTE["amber"],
+            )
 
     def _append_rich(self, segments: list[tuple[str, str]]) -> None:
         self.output.configure(state="normal")
@@ -4546,8 +4539,10 @@ class DynamicIslandPill:
         try:
             if active:
                 if not self.stop_canvas.winfo_manager():
-                    anchor_widget = self.apps_btn if self.expanded else self.compact_voice_btn
-                    self.stop_canvas.pack(side="left", padx=(0, 6), before=anchor_widget)
+                    if self.expanded:
+                        self.stop_canvas.pack(side="left", padx=(0, 6))
+                    else:
+                        self.stop_canvas.pack(side="left", padx=(0, 6), before=self.compact_voice_btn)
                 if self.busy:
                     self.send_btn.configure(text="➤ Push", bg="#1D4ED8", fg="#F2F8FF")
                 else:

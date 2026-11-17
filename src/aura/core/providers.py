@@ -667,6 +667,16 @@ class CloudProvider:
         candidates = list(raw_candidates[min(self._active_idx, len(raw_candidates) - 1) :])
         if not os.environ.get("PYTEST_CURRENT_TEST") and len(candidates) > 1:
             now_mono = time.monotonic()
+            # Keep Gemini primary in cloud:auto by promoting any healthy sibling Gemini fallback before bumping FreeLLMAPI ahead.
+            promoted: list[tuple[str, str, str, str]] = []
+            for p_name, b_url, a_key, a_mdl in candidates:
+                if _CLOUD_COOLDOWN_UNTIL.get((p_name, a_mdl), 0.0) > now_mono:
+                    siblings = CLOUD_PRESETS.get(p_name, {}).get("fallback_models") or ()
+                    healthy_sib = next((s for s in siblings if s != a_mdl and _CLOUD_COOLDOWN_UNTIL.get((p_name, s), 0.0) <= now_mono), None)
+                    if healthy_sib:
+                        a_mdl = str(healthy_sib)
+                promoted.append((p_name, b_url, a_key, a_mdl))
+            candidates = promoted
             healthy = [c for c in candidates if _CLOUD_COOLDOWN_UNTIL.get((c[0], c[3]), 0.0) <= now_mono]
             if healthy:
                 cooled = [c for c in candidates if c not in healthy]
@@ -975,3 +985,11 @@ class ProviderFactory:
             num_predict=int(os.environ.get("AGENT_SYNTHESIS_MAX_TOKENS", "1536")),
             timeout=timeout_val,
         )
+
+
+def create_local_qwen_fallback(num_ctx: int | None = None) -> OllamaProvider:
+    """Create a fast local Qwen 4B Ollama provider for cloud rate-limit/outage fallback."""
+    model = _first_env("AURA_FALLBACK_LOCAL_MODEL", "AURA_LIGHTWEIGHT_MODEL", "AGENT_MODEL") or "qwen3.5:4b"
+    if is_cloud_model_spec(model):
+        model = "qwen3.5:4b"
+    return ProviderFactory.create_ollama(model=model, num_ctx=num_ctx)

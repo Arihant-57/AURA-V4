@@ -15,7 +15,7 @@ from typing import Any, Callable
 from ..config import get_settings, resolve_workspace, load_aura_env
 from ..config.workspace import normalize_workspace_path, find_referenced_directory
 from ..core import McpHub, SessionMemory, ResultCache
-from ..core.providers import ProviderFactory, is_cloud_model_spec
+from ..core.providers import ProviderFactory, create_local_qwen_fallback, is_cloud_model_spec
 from ..core.model_registry import ModelRegistry, ModelRole
 from ..core.model_router import (
     ModelRouter, classify_task_role, needs_multi_stage, is_heavy_task, TaskState, TaskStage,
@@ -196,15 +196,11 @@ async def _run_task(
                 except Exception:
                     pass
             try:
-                cloud_state = (
-                    TaskState(
-                        original_request=routing_task,
-                        workspace=str(getattr(hub, "workspace", "")),
-                        read_only=getattr(hub, "read_only", True),
-                        active_agent=effective_agent,
-                    )
-                    if effective_agent != "auto"
-                    else None
+                cloud_state = TaskState(
+                    original_request=routing_task,
+                    workspace=str(getattr(hub, "workspace", "")),
+                    read_only=getattr(hub, "read_only", True),
+                    active_agent=effective_agent,
                 )
                 ans = await run_agent_loop(
                     task, cloud_provider, hub, memory, cache,
@@ -213,8 +209,9 @@ async def _run_task(
                     steer_queue=steer_queue,
                     get_pending_steer=get_pending_steer,
                 )
-                if not ans.startswith(("Error: Cannot connect", "Error: Cloud API", "Error: Failed to get model response")):
-                    return ans, [cloud_provider]
+                if not ans.startswith(("Error: Cannot connect", "Error: Cloud API", "Error: Failed to get model response", "Error: Timed out", "Error: Request")):
+                    used = [cloud_provider] + [p for p in cloud_state.used_providers if p is not cloud_provider]
+                    return ans, used
             except Exception:
                 pass
             if on_event is not None:
@@ -261,6 +258,7 @@ async def _run_task(
                     await res
             except Exception:
                 pass
+        is_cloud_task = is_cloud_model_spec(getattr(task_provider, "model", None))
         specialist_state = (
             TaskState(
                 original_request=routing_task,
@@ -268,7 +266,7 @@ async def _run_task(
                 read_only=getattr(hub, "read_only", True),
                 active_agent=effective_agent,
             )
-            if effective_agent != "auto"
+            if (effective_agent != "auto" or is_cloud_task)
             else None
         )
         try:
@@ -279,7 +277,38 @@ async def _run_task(
                 steer_queue=steer_queue,
                 get_pending_steer=get_pending_steer,
             )
-            return answer, [task_provider]
+            used_list = [task_provider]
+            if specialist_state is not None:
+                used_list.extend(p for p in specialist_state.used_providers if p is not task_provider)
+            if (
+                is_cloud_task
+                and len(used_list) == 1
+                and os.environ.get("AURA_CLOUD_STRICT") != "1"
+                and answer.startswith(("Error: Cannot connect", "Error: Cloud API", "Error: Failed to get model response", "Error: Timed out", "Error: Request"))
+            ):
+                qwen_fb = create_local_qwen_fallback(ctx_override)
+                if qwen_fb.is_model_available():
+                    if on_event is not None:
+                        try:
+                            res = on_event({
+                                "event": "stage",
+                                "stage": "fallback",
+                                "model": qwen_fb.model,
+                                "message": f"Gemini limit/outage — switched to {qwen_fb.model}...",
+                            })
+                            if inspect.isawaitable(res):
+                                await res
+                        except Exception:
+                            pass
+                    answer = await run_agent_loop(
+                        task, qwen_fb, hub, memory, cache,
+                        task_state=specialist_state,
+                        on_event=on_event,
+                        steer_queue=steer_queue,
+                        get_pending_steer=get_pending_steer,
+                    )
+                    used_list.append(qwen_fb)
+            return answer, used_list
         finally:
             if unload_on_complete and hasattr(task_provider, "unload"):
                 task_provider.unload()

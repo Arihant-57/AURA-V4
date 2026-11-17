@@ -300,4 +300,48 @@ async def test_gemini_503_failover_prefers_fast_3_flash_preview(monkeypatch):
     assert provider.api_model == "gemini-3-flash-preview"
 
 
+@pytest.mark.asyncio
+async def test_gemini_rate_limit_converts_back_to_qwen_4b_and_avoids_email_coder_swap(monkeypatch, tmp_path: Path):
+    from ollama import ChatResponse, Message
+    from src.aura.agents.loop import run_agent_loop
+    from src.aura.core import McpHub, ResultCache, SessionMemory
+    from src.aura.core.model_registry import ModelRole
+    from src.aura.core.model_router import classify_task_role, TaskState
+
+    # Email / calendar prose stays on fast 4B instead of cold-swapping 7B coder weights
+    email_prompt = "write an email to harsh about tomorrow morning meeting"
+    assert classify_task_role(email_prompt, TaskScope(email_prompt)) == ModelRole.LIGHTWEIGHT
+
+    cloud = CloudProvider("cloud:gemini/gemini-3.8-flash", api_key="gm_key", auto_failover=False)
+    cloud.chat = AsyncMock(side_effect=TimeoutError("Cloud API rate limit reached (429)"))
+
+    qwen_fb = MagicMock()
+    qwen_fb.model = "qwen3.5:4b"
+    qwen_fb.is_model_available = MagicMock(return_value=True)
+    qwen_fb.chat = AsyncMock(
+        return_value=ChatResponse(
+            model="qwen3.5:4b",
+            message=Message(role="assistant", content="Converted cleanly to Qwen 4B response."),
+        )
+    )
+
+    hub = MagicMock(spec=McpHub)
+    hub.read_only = True
+    hub.workspace = tmp_path
+    hub.broken = set()
+    hub.tools = {}
+    hub.tool_schemas = {}
+    hub.tool_clients = {}
+
+    state = TaskState(original_request="draft summary", workspace=str(tmp_path), read_only=True)
+    with patch("src.aura.agents.loop.create_local_qwen_fallback", return_value=qwen_fb):
+        ans = await run_agent_loop("draft summary", cloud, hub, SessionMemory(), ResultCache(ttl_seconds=60), task_state=state)
+
+    assert "Converted cleanly to Qwen 4B response." in ans
+    assert cloud.chat.await_count == 1
+    assert qwen_fb.chat.await_count == 1
+    assert qwen_fb in state.used_providers
+
+
+
 
