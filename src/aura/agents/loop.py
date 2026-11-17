@@ -912,9 +912,10 @@ async def run_agent_loop(
         messages_to_send = loop_guard.compress_context(
             prune_conversation_history(messages, settings)
         )
+        use_native_tools = bool(active_tool_names)
         for attempt in range(settings.agent.model_call_attempts):
             try:
-                response = await active_provider.chat(messages_to_send, tools=ollama_tools if active_tool_names else None)
+                response = await active_provider.chat(messages_to_send, tools=ollama_tools if use_native_tools else None)
                 break
             except ConnectionError as e:
                 if await _try_switch_to_qwen(e):
@@ -947,6 +948,37 @@ async def run_agent_loop(
             except Exception as e:
                 if await _try_switch_to_qwen(e):
                     continue
+                err_low = str(e).lower()
+                if use_native_tools and (
+                    "xml syntax error" in err_low
+                    or "element <function>" in err_low
+                    or ("</parameter>" in err_low and ("xml" in err_low or "syntax" in err_low or "parse" in err_low))
+                    or "does not support tools" in err_low
+                ):
+                    logger.warning("Ollama tool-template error (%s); retrying in text-tool mode.", e)
+                    use_native_tools = False
+                    if active_tools and not any(
+                        str(m.get("content", "")).startswith("If calling a tool, output ONLY")
+                        for m in messages_to_send
+                    ):
+                        sigs = "; ".join(
+                            f"{t.name}({', '.join((t.inputSchema or {}).get('properties', {}).keys())})"
+                            for t in active_tools[:24]
+                        )
+                        messages_to_send = [
+                            *messages_to_send,
+                            {
+                                "role": "system",
+                                "content": f"If calling a tool, output ONLY ```json {{\"name\": \"<tool>\", \"arguments\": {{...}}}}```. Tools: {sigs}",
+                            },
+                        ]
+                    if attempt < settings.agent.model_call_attempts - 1:
+                        continue
+                    try:
+                        response = await active_provider.chat(messages_to_send, tools=None)
+                        break
+                    except Exception as fb_exc:
+                        e = fb_exc
                 if is_cloud_model_spec(getattr(active_provider, "model", None)):
                     return f"Error: {e}"
                 # Other errors - retry as potentially transient

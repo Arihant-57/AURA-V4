@@ -418,3 +418,26 @@ def test_fast_router_handles_chrome_variants_and_system_folders(tmp_path: Path):
         assert r_bare.action == "open_path"
         mock_file.assert_called_once_with("smart helmet", read_only=False)
 
+
+def test_fast_router_chrome_tab_variants_and_whatsapp_app(tmp_path: Path):
+    router = FastRouter(storage_dir=tmp_path)
+    with patch("src.aura.core.fast_router.open_website_impl", return_value="Opened in Chrome") as mock_open:
+        for phrase in (
+            "open a chrome tab and open youtube",
+            "open a new tab in chrome and go to youtube",
+            "open youtube in a new chrome tab",
+            "open chrome and youtube",
+        ):
+            res = router.try_handle(phrase, read_only=False)
+            assert res.handled is True, phrase
+            assert res.action == "open_website", phrase
+            assert mock_open.call_args.kwargs["browser"] == "chrome", phrase
+
+    with patch("src.aura.core.fast_router.launch_app_impl", return_value="Launched") as mock_launch:
+        r_tab = router.try_handle("open a new chrome tab", read_only=False)
+        assert r_tab.handled is True and r_tab.action == "launch_app"
+        r_wa = router.try_handle("open whatsapp app", read_only=False)
+        assert r_wa.handled is True and r_wa.action == "launch_app"
+        assert mock_launch.call_args_list[1].args[0] == "whatsapp"
+
+

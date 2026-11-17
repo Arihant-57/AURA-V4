@@ -54,8 +54,8 @@ if ($null -eq $rec) {
 }
 $rec.BabbleTimeout = [TimeSpan]::FromSeconds(0)
 $rec.InitialSilenceTimeout = [TimeSpan]::FromSeconds(0)
-$rec.EndSilenceTimeout = [TimeSpan]::FromMilliseconds(1600)
-$rec.EndSilenceTimeoutAmbiguous = [TimeSpan]::FromMilliseconds(2200)
+$rec.EndSilenceTimeout = [TimeSpan]::FromMilliseconds(850)
+$rec.EndSilenceTimeoutAmbiguous = [TimeSpan]::FromMilliseconds(1100)
 
 $dictation = New-Object System.Speech.Recognition.DictationGrammar
 $rec.LoadGrammar($dictation)
@@ -315,12 +315,13 @@ def transcribe_whisper_audio(model: Any, audio: Any) -> str:
         normalized_audio = audio
 
     prompt_txt, hotwords_txt = _build_whisper_prompt_and_hotwords()
+    beam = max(1, int(os.environ.get("AURA_WHISPER_BEAM_SIZE", "1")))
     try:
         segments, _ = model.transcribe(
             normalized_audio,
             language="en",
-            beam_size=5,
-            best_of=5,
+            beam_size=beam,
+            best_of=beam,
             temperature=0.0,
             initial_prompt=prompt_txt,
             hotwords=hotwords_txt,
@@ -332,8 +333,8 @@ def transcribe_whisper_audio(model: Any, audio: Any) -> str:
             segments, _ = model.transcribe(
                 normalized_audio,
                 language="en",
-                beam_size=5,
-                best_of=5,
+                beam_size=beam,
+                best_of=beam,
                 temperature=0.0,
                 initial_prompt=prompt_txt,
                 condition_on_previous_text=False,

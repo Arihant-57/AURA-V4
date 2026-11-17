@@ -842,10 +842,12 @@ class FastRouter:
             )
 
         # 4. Explicit Chrome/Edge + sites, browser + sites, or known website/app open
+        _b_art = r"(?:(?:a|the|my)\s+)?(?:(?:new|fresh)\s+)?(?:google\s+)?"
+        _t_spec = r"(?:(?:a|the|new|a\s+new)\s+tab\s+(?:in|on|using)\s+" + _b_art + r"|" + _b_art + r")(?P<browser>chrome|edge|msedge)(?:\s+tab)?"
         for chrome_pat in (
-            r"^(?:please\s+)?(?:open|launch|start)\s+(?:my\s+)?(?:google\s+)?(?P<browser>chrome|edge|msedge)\s+and\s+(?:open|go\s+to|visit|navigate\s+to|load|launch)?\s*(?:like\s+|the\s+)?(?P<target>.+?)[.?!]*$",
-            r"^(?:please\s+)?(?:open|launch|go\s+to|visit|load)\s+(?:like\s+|the\s+)?(?P<target>.+?)\s+(?:in|on|using|with)\s+(?:my\s+)?(?:google\s+)?(?P<browser>chrome|edge|msedge)[.?!]*$",
-            r"^(?:please\s+)?(?:open|launch|start)\s+(?:my\s+)?(?:google\s+)?(?P<browser>chrome|edge|msedge)\s+(?:with|to)\s+(?:like\s+|the\s+)?(?P<target>.+?)[.?!]*$",
+            r"^(?:please\s+)?(?:open|launch|start)\s+" + _t_spec + r"\s+(?:(?:and\s+)?(?:open|go\s+to|visit|navigate\s+to|load|launch)\s+|and\s+)(?:like\s+|the\s+)?(?P<target>.+?)[.?!]*$",
+            r"^(?:please\s+)?(?:open|launch|go\s+to|visit|load)\s+(?:like\s+|the\s+)?(?P<target>.+?)\s+(?:in|on|using|with)\s+" + _t_spec + r"[.?!]*$",
+            r"^(?:please\s+)?(?:open|launch|start)\s+" + _t_spec + r"\s+(?:with|to|for)\s+(?:like\s+|the\s+)?(?P<target>.+?)[.?!]*$",
         ):
             m_chrome = re.match(chrome_pat, norm, re.IGNORECASE)
             if m_chrome:
@@ -915,9 +917,14 @@ class FastRouter:
                     "firefox", "brave", "notepad", "calc", "calculator",
                     "vs code", "vscode", "code", "terminal", "paint",
                     "spotify", "discord", "explorer", "file explorer",
-                    "task manager", "settings",
+                    "task manager", "settings", "whatsapp", "telegram",
+                    "powershell", "cmd",
                 }
-                app_cand = re.sub(r"\s+(?:browser|app)$", "", lower_target).strip()
+                app_cand = re.sub(
+                    r"\s+(?:browser|app|tab)$",
+                    "",
+                    re.sub(r"^(?:(?:a|the|new)\s+)+", "", lower_target),
+                ).strip()
                 if lower_target in _known_app_tokens or app_cand in _known_app_tokens:
                     return _done(launch_app_impl(app_cand if app_cand in _known_app_tokens else target, read_only=read_only), "launch_app")
 

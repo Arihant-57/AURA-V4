@@ -110,6 +110,17 @@ _WINDOWS_URIS: dict[str, str] = {
     "camera": "microsoft.windows.camera:",
     "clock": "ms-clock:",
     "alarms": "ms-clock:",
+    "whatsapp": "whatsapp:",
+    "whatsapp app": "whatsapp:",
+    "telegram": "tg:",
+    "telegram app": "tg:",
+    "discord app": "discord:",
+}
+
+_URI_WEB_FALLBACKS: dict[str, str] = {
+    "whatsapp:": "https://web.whatsapp.com",
+    "tg:": "https://web.telegram.org",
+    "discord:": "https://discord.com/app",
 }
 
 _MEDIA_KEYS: dict[str, int] = {
@@ -911,6 +922,12 @@ def launch_app_impl(app_name: str, args: str = "", read_only: bool | None = None
             os.startfile(uri)
             return f"Opened {clean} ({uri})."
         except OSError as exc:
+            web_url = _URI_WEB_FALLBACKS.get(uri)
+            if web_url:
+                import webbrowser
+
+                webbrowser.open(web_url)
+                return f"Opened {clean} via web ({web_url})."
             return f"ERROR opening '{uri}': {exc}"
 
     mapped = _APP_ALIASES.get(clean.lower(), clean)
@@ -1694,6 +1711,32 @@ for ($i = 0; $i -lt $all.Count -and $count -lt {limit}; $i++) {{
         Write-Output "[$shortType] $nm"
         $count++
     }}
+}}
+$docOrEdit = New-Object System.Windows.Automation.OrCondition(
+    (New-Object System.Windows.Automation.PropertyCondition($ctProp, [System.Windows.Automation.ControlType]::Document)),
+    (New-Object System.Windows.Automation.PropertyCondition($ctProp, [System.Windows.Automation.ControlType]::Edit))
+)
+$textEls = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $docOrEdit)
+$bestBody = ''
+for ($j = 0; $j -lt $textEls.Count -and $j -lt 12; $j++) {{
+    $tEl = $textEls.Item($j)
+    try {{
+        if ($tEl.Current.IsOffscreen) {{ continue }}
+        $txt = ''
+        $pat = $null
+        if ($tEl.TryGetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern, [ref]$pat)) {{
+            $txt = [string]$pat.DocumentRange.GetText(6000)
+        }} elseif ($tEl.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$pat)) {{
+            $txt = [string]$pat.Current.Value
+        }}
+        if ($txt -and $txt.Trim().Length -gt $bestBody.Length) {{
+            $bestBody = $txt.Trim()
+        }}
+    }} catch {{}}
+}}
+if ($bestBody) {{
+    Write-Output "=== WINDOW TEXT ==="
+    Write-Output $bestBody
 }}
 """
     rc, out, err = _run_powershell(ps, timeout=10)

@@ -343,5 +343,41 @@ async def test_gemini_rate_limit_converts_back_to_qwen_4b_and_avoids_email_coder
     assert qwen_fb in state.used_providers
 
 
+@pytest.mark.asyncio
+async def test_gemini_falls_back_to_flash_lite_and_caps_final_timeout(monkeypatch):
+    for k in ("GROQ_API_KEY", "OPENROUTER_API_KEY", "GITHUB_TOKEN", "AURA_CLOUD_API_KEY", "AURA_CLOUD_BASE_URL", "FREELLMAPI_ENDPOINT", "FREELLMAPI_KEY", "GEMINI_MODEL", "AURA_GEMINI_MODEL", "AURA_CLOUD_STRICT"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("GEMINI_API_KEY", "gm_key")
+
+    with patch("src.aura.config.settings.load_aura_env", return_value=None):
+        provider = CloudProvider("cloud:gemini")
+
+    resp_503 = MagicMock(status_code=503, text="high demand")
+    resp_404 = MagicMock(status_code=404, text="not found")
+    resp_ok = MagicMock(status_code=200)
+    resp_ok.json.return_value = {"choices": [{"message": {"content": "flash lite works"}}]}
+
+    captured_timeouts: list[object] = []
+
+    with patch("src.aura.core.providers.httpx.AsyncClient") as mock_client_cls:
+        def _mk_client(*args, **kwargs):
+            captured_timeouts.append(kwargs.get("timeout"))
+            cm = MagicMock()
+            cm.__aenter__ = AsyncMock(return_value=client_inst)
+            cm.__aexit__ = AsyncMock(return_value=None)
+            return cm
+
+        client_inst = AsyncMock()
+        client_inst.post.side_effect = [resp_503, resp_503, resp_404, resp_ok]
+        mock_client_cls.side_effect = _mk_client
+
+        out = await provider.chat([{"role": "user", "content": "hi"}])
+
+    assert out.message.content == "flash lite works"
+    assert provider.api_model == "gemini-3.5-flash-lite"
+    assert all(isinstance(t, httpx.Timeout) and t.read <= 18.0 for t in captured_timeouts)
+
+
+
 
 

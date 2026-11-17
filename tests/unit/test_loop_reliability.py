@@ -314,3 +314,28 @@ async def test_11_session_usable_after_recoverable_failure(mock_hub, fast_settin
     ))
     res2 = await run_agent_loop("Task 2", provider2, mock_hub, memory, cache)
     assert res2 == "Task 2 succeeded smoothly."
+
+
+@pytest.mark.asyncio
+async def test_12_recovers_immediately_from_ollama_xml_tool_template_500(mock_hub, fast_settings):
+    """Scenario 12: XML <function></parameter> 500 retries immediately with native tools disabled."""
+    memory = SessionMemory()
+    cache = ResultCache(ttl_seconds=300)
+    mock_hub.tools = {"read_file": MockMCPTool("read_file")}
+
+    provider = MagicMock(spec=OllamaProvider)
+    seen_tools_args: list[object] = []
+
+    async def _chat(msgs, tools=None, **kw):
+        seen_tools_args.append(tools)
+        if tools is not None:
+            raise RuntimeError("XML syntax error on line 3: element <function> closed by </parameter>")
+        return MagicMock(message=MagicMock(content="Recovered via text-tool mode.", tool_calls=None))
+
+    provider.chat = AsyncMock(side_effect=_chat)
+    res = await run_agent_loop("Check file", provider, mock_hub, memory, cache)
+    assert "Recovered via text-tool mode." in res
+    assert len(seen_tools_args) == 2
+    assert seen_tools_args[0] is not None
+    assert seen_tools_args[1] is None
+

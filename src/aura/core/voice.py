@@ -183,8 +183,9 @@ def _synthesize_edge_to_pcm(text: str, persona: str) -> tuple[np.ndarray, int]:
     tmp.close()
 
     async def _gen() -> None:
+        edge_timeout = max(1.0, float(os.environ.get("AURA_EDGE_TTS_TIMEOUT", "4.0")))
         comm = edge_tts.Communicate(text, voice, pitch=pitch, rate=rate)
-        await comm.save(str(mp3_path))
+        await asyncio.wait_for(comm.save(str(mp3_path)), timeout=edge_timeout)
 
     try:
         try:

@@ -312,6 +312,8 @@ CLOUD_PRESETS: dict[str, dict[str, Any]] = {
             "gemini-3.8-flash",
             "gemini-3-flash-preview",
             "gemini-3.6-flash",
+            "gemini-3.5-flash-lite",
+            "gemini-3.1-flash-lite-preview",
             "gemini-3.5-flash",
         ),
         "key_envs": ("GEMINI_API_KEY", "GEMINIAPI_KEY", "GOOGLE_API_KEY"),
@@ -719,17 +721,31 @@ class CloudProvider:
                 nonlocal gemini_fb_injected
                 if not gemini_fb_injected and idx + 1 >= len(candidates) and preset == "gemini":
                     gemini_fb_injected = True
-                    for fb in ("gemini-3-flash-preview", "gemini-3.6-flash"):
-                        if fb != api_model:
+                    for fb in (
+                        "gemini-3-flash-preview",
+                        "gemini-3.6-flash",
+                        "gemini-3.5-flash-lite",
+                        "gemini-3.1-flash-lite-preview",
+                        "gemini-3.5-flash",
+                    ):
+                        if fb != api_model and (preset, base_url, api_key, fb) not in candidates:
                             candidates.append(("gemini", base_url, api_key, fb))
 
             has_fallback = (idx + 1 < len(candidates)) or (
-                not gemini_fb_injected and preset == "gemini" and api_model not in ("gemini-3.6-flash",)
+                not gemini_fb_injected
+                and preset == "gemini"
+                and api_model not in ("gemini-3.5-flash-lite", "gemini-3.1-flash-lite-preview")
             )
-            fb_cap = 55.0 if _is_freellmapi_url(base_url) else 12.0
+            strict_cloud = os.environ.get("AURA_CLOUD_STRICT", "").strip().lower() in ("1", "true", "yes")
+            if _is_freellmapi_url(base_url):
+                fb_cap = 55.0
+            elif has_fallback:
+                fb_cap = 10.0
+            else:
+                fb_cap = float(self.timeout) if strict_cloud else 18.0
             req_timeout: Any = (
                 httpx.Timeout(min(float(self.timeout), fb_cap), connect=5.0)
-                if has_fallback
+                if (has_fallback or not strict_cloud)
                 else self.timeout
             )
 

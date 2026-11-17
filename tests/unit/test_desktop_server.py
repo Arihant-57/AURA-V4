@@ -612,3 +612,25 @@ def test_bfs_shallow_local_search_stops_before_deep_subtree(tmp_path: Path, monk
     assert hits and hits[0] == target
 
 
+def test_desktop_whatsapp_web_fallback_and_ui_see_text(monkeypatch):
+    import sys
+    from unittest.mock import MagicMock
+
+    if sys.platform == "win32":
+        opened_web: list[str] = []
+        monkeypatch.setattr(ds.os, "startfile", MagicMock(side_effect=OSError("not installed")))
+        import webbrowser
+
+        monkeypatch.setattr(webbrowser, "open", lambda u: opened_web.append(u) or True)
+        res = ds.launch_app_impl("whatsapp", read_only=False)
+        assert "https://web.whatsapp.com" in res
+        assert opened_web == ["https://web.whatsapp.com"]
+
+        monkeypatch.setattr(ds, "_find_window", lambda t: {"hwnd": 77, "title": "buggy_demo.py - Notepad", "minimized": False})
+        monkeypatch.setattr(ds, "_run_powershell", lambda script, timeout=10: (0, "[Button] File\n=== WINDOW TEXT ===\ndef broken(): pass", ""))
+        see_out = ds.ui_see_impl("Notepad")
+        assert "=== WINDOW TEXT ===" in see_out
+        assert "def broken(): pass" in see_out
+
+
+

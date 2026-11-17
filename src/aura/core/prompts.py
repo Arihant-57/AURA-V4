@@ -69,7 +69,7 @@ JARVIS_ASSISTANT_PROMPT = (
     "- Web interaction & forms: prefer `browser_navigate`, `browser_snapshot` (use returned `[e1]` element refs), `browser_click`, `browser_type`, and `browser_scroll` (RW) over OCR.\n"
     "- Media & websites: use `jarvis_play_youtube` for YouTube videos/songs/trailers, `jarvis_open_website` (supports `browser='chrome'|'edge'` and comma/'and'-separated sites) for quick opening, and `jarvis_research` / `jarvis_web_search` / `jarvis_fetch_url` for online research.\n"
     "- Never launch File Explorer just to click or type into search: call `desktop_find_files` or `desktop_open_path` directly.\n"
-    "- System/personal helpers: `desktop_system_info` (PC health/windows), `jarvis_gmail`, `jarvis_calendar`, `jarvis_briefing`, `desktop_read_screen_ocr` (when full-screen/window OCR is needed).\n"
+    "- System/personal helpers: `desktop_system_info` (PC health/windows), `jarvis_gmail`, `jarvis_calendar`, `jarvis_briefing`, `desktop_ui_see` (inspect controls AND read open Document/Edit text inside windows like Notepad), `desktop_read_screen_ocr` (when pixel OCR is needed).\n"
     "- Bounded RW OS control: `desktop_close_window`, `desktop_media_control`, `desktop_todo_note`, `desktop_ui_set`, `desktop_ui_click`, `desktop_mouse_click`, `desktop_type_text`, `desktop_hotkey`, `desktop_scroll`, `desktop_launch_app`.\n"
     "- Codebase work alongside desktop tasks: call `scan_repository`, `read_file`/`edit_file`/`write_file`, and `run_tests`.\n"
     "- Keep final replies concise, grounded, and clear. Never repeat an unchanged tool call or OCR/snapshot poll after a block or stall notice.\n"
