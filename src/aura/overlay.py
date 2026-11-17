@@ -25,6 +25,7 @@ import inspect
 import math
 import os
 import re
+import subprocess
 import sys
 import threading
 import time
@@ -65,8 +66,73 @@ _PERSONA_LABELS = {
     "ultron": "🎙 Ultron",
     "megatron": "🎙 Megatron",
 }
+
+_PERSONA_THEMES: dict[str, dict[str, Any]] = {
+    "cyber_blue": {
+        "key": "cyber_blue",
+        "mode_label": "Cyber Blue ▾",
+        "menu_title": "Cyber Blue (Default)",
+        "accent": "#5CC3F2",
+        "bright": "#E6FAFF",
+        "deep": "#1F6FA8",
+        "arc_border": "#5CC3F2",
+        "border": "#2D4663",
+        "pill_bg": "#15304B",
+        "pill_fg": "#B4E1F8",
+        "orb_stops": ((11, 44, 76), (31, 118, 178), (92, 195, 242), (232, 248, 255)),
+        "wave_glow": "#1F6FA8",
+        "wave_mid": "#38BDF8",
+        "wave_main": "#7DD3FC",
+        "wave_core": "#E6FAFF",
+    },
+    "ultron": {
+        "key": "ultron",
+        "mode_label": "Ultron Mode ▾",
+        "menu_title": "Ultron Mode (Golden Galaxy)",
+        "accent": "#F59E0B",
+        "bright": "#FFFBEB",
+        "deep": "#92400E",
+        "arc_border": "#FBBF24",
+        "border": "#684819",
+        "pill_bg": "#36250E",
+        "pill_fg": "#FDE68A",
+        "orb_stops": ((78, 42, 6), (180, 110, 18), (251, 191, 36), (255, 251, 235)),
+        "wave_glow": "#92400E",
+        "wave_mid": "#D97706",
+        "wave_main": "#FBBF24",
+        "wave_core": "#FFFBEB",
+    },
+    "megatron": {
+        "key": "megatron",
+        "mode_label": "Megatron ▾",
+        "menu_title": "Megatron Mode (Crimson Core)",
+        "accent": "#EF4444",
+        "bright": "#FFFFFF",
+        "deep": "#7F1D1D",
+        "arc_border": "#F87171",
+        "border": "#6E232E",
+        "pill_bg": "#38141E",
+        "pill_fg": "#FECDD3",
+        "orb_stops": ((76, 12, 22), (185, 28, 44), (248, 113, 113), (255, 255, 255)),
+        "wave_glow": "#7F1D1D",
+        "wave_mid": "#DC2626",
+        "wave_main": "#FB7185",
+        "wave_core": "#FFFFFF",
+    },
+}
+
+
+def _get_persona_theme(persona: str) -> dict[str, Any]:
+    low = (persona or "off").lower()
+    if low == "ultron":
+        return _PERSONA_THEMES["ultron"]
+    if low == "megatron":
+        return _PERSONA_THEMES["megatron"]
+    return _PERSONA_THEMES["cyber_blue"]
+
+
 _INLINE_METRICS_RE = re.compile(r"\[{1,2}Metrics\s*(?:\(([^)]+)\))?:[^\]]*\]{1,2}\s*", re.IGNORECASE)
-_PLACEHOLDER = "Ask Aura anything, or type / for commands and @ for agents"
+_PLACEHOLDER = "Message AURA..."
 _PUSH_PLACEHOLDER = "Push steering instruction while Aura works (keeps output)..."
 _TOOLS_FILTER_HINT = "Filter tools..."
 
@@ -76,36 +142,36 @@ _MONO_FONT = "Cascadia Code" if sys.platform == "win32" else "Consolas"
 
 _PALETTE = {
     "chroma": "#010203",
-    "bg": "#181C23",
-    "titanium": "#3B424F",
-    "gunmetal": "#151920",
-    "panel_mid": "#222731",
-    "card": "#282E3A",
-    "card_hi": "#313948",
-    "well": "#111419",
-    "well_lo": "#161A21",
-    "hdr_bar": "#13161C",
-    "code_bg": "#0E1116",
-    "chip": "#2A303C",
-    "chip_hover": "#3B4454",
-    "border": "#576477",
-    "border_hi": "#7D8DA3",
-    "text": "#E8EDF4",
-    "steel": "#C9D3E0",
-    "muted": "#98A4B5",
+    "bg": "#0E1520",
+    "titanium": "#223145",
+    "gunmetal": "#0B111A",
+    "panel_mid": "#131D2B",
+    "card": "#162233",
+    "card_hi": "#1D2C41",
+    "well": "#0E1622",
+    "well_lo": "#101A28",
+    "hdr_bar": "#111A27",
+    "code_bg": "#0A1018",
+    "chip": "#192638",
+    "chip_hover": "#243750",
+    "border": "#2C415B",
+    "border_hi": "#4E6D92",
+    "text": "#EAF1F9",
+    "steel": "#C6D3E3",
+    "muted": "#8FA2B8",
     "accent": "#5CC3F2",
     "blue": "#5CC3F2",
-    "arc_border": "#6FCBF4",
-    "arc_text": "#B4E1F8",
+    "arc_border": "#5CC3F2",
+    "arc_text": "#C2ECFF",
     "deep_blue": "#1F6FA8",
-    "cta_bg": "#237BB5",
-    "cta_hover": "#2E8FD0",
+    "cta_bg": "#2574DB",
+    "cta_hover": "#3488F0",
     "amber": "#FBBF24",
-    "pill_active_bg": "#1B3B56",
-    "pill_active_fg": "#B4E1F8",
-    "danger_bg": "#3A1D28",
-    "danger_hover": "#552334",
-    "danger_fg": "#FDA4AF",
+    "pill_active_bg": "#15324E",
+    "pill_active_fg": "#C2ECFF",
+    "danger_bg": "#C92A38",
+    "danger_hover": "#E03544",
+    "danger_fg": "#FFFFFF",
 }
 
 _PIPELINE_NODES: tuple[tuple[str, str], ...] = (
@@ -213,8 +279,13 @@ def _lerp_rgb(c1: tuple[int, int, int], c2: tuple[int, int, int], t: float) -> t
     )
 
 
-def _render_ultron_eye_photo(size: int, shuttered: bool = False, bg_hex: str = "#171A20") -> Any:
-    """Render a 3x-supersampled brushed-steel Ultron eye with cold arc-blue core."""
+def _render_ultron_eye_photo(
+    size: int,
+    shuttered: bool = False,
+    bg_hex: str = "#111A27",
+    persona: str = "jarvis",
+) -> Any:
+    """Render a 3x-supersampled spiral galaxy / energy core orb themed to Cyber Blue, Ultron, or Megatron."""
     if Image is None or ImageDraw is None or ImageTk is None:
         return None
     scale = 3
@@ -222,22 +293,24 @@ def _render_ultron_eye_photo(size: int, shuttered: bool = False, bg_hex: str = "
     img = Image.new("RGBA", (s, s), _hex_rgb(bg_hex) + (255,))
     draw = ImageDraw.Draw(img, "RGBA")
 
-    # Conic metallic steel bezel ring rendered from fine wedges
     cx = cy = s / 2.0
+    theme = _get_persona_theme(persona)
+    c_dark, c_mid, c_bright, c_core = theme["orb_stops"]
     outer_r = s * 0.48
-    stops = [
-        _hex_rgb("#4A5160"),
-        _hex_rgb("#C9D3E0"),
-        _hex_rgb("#6B7587"),
-        _hex_rgb("#E6EDF5"),
-        _hex_rgb("#4A5160"),
-        _hex_rgb("#98A5B8"),
-        _hex_rgb("#4A5160"),
-    ]
     if shuttered:
         stops = [_hex_rgb("#343A46"), _hex_rgb("#6B7587"), _hex_rgb("#434A58"), _hex_rgb("#8693A6"), _hex_rgb("#343A46")]
+    else:
+        stops = [
+            _hex_rgb("#26303D"),
+            c_mid,
+            _hex_rgb("#D6E0EE"),
+            c_bright,
+            _hex_rgb("#2C3748"),
+            c_mid,
+            _hex_rgb("#26303D"),
+        ]
 
-    steps = 72
+    steps = 60
     box = [cx - outer_r, cy - outer_r, cx + outer_r, cy + outer_r]
     for i in range(steps):
         frac = i / steps
@@ -248,28 +321,41 @@ def _render_ultron_eye_photo(size: int, shuttered: bool = False, bg_hex: str = "
         a1 = 200 + ((i + 1) / steps) * 360.0 + 1.5
         draw.pieslice(box, start=a0, end=a1, fill=col + (255,))
 
-    # Inner dark socket
-    sock_pad = max(3, int(size * (0.10 if size <= 32 else 0.095) * scale))
+    # Inner dark vacuum socket
+    sock_pad = max(3, int(size * (0.09 if size <= 32 else 0.085) * scale))
     sock_box = [sock_pad, sock_pad, s - sock_pad, s - sock_pad]
-    draw.ellipse(sock_box, fill=(19, 22, 27, 255))
+    draw.ellipse(sock_box, fill=(8, 11, 16, 255))
 
     if shuttered:
         slit_h = max(scale * 2, int(s * 0.07))
         y0 = int(cy - slit_h / 2)
         y1 = int(cy + slit_h / 2)
-        left_x = int(s * 0.24)
-        right_x = int(s * 0.76)
-        draw.rounded_rectangle([left_x, y0, right_x, y1], radius=slit_h, fill=(143, 160, 181, 235))
+        draw.rounded_rectangle([int(s * 0.24), y0, int(s * 0.76), y1], radius=slit_h, fill=(143, 160, 181, 235))
     else:
-        iris_pad = max(sock_pad + scale * 2, int(size * 0.20 * scale))
-        ir0, ir1 = iris_pad, s - iris_pad
-        draw.ellipse([ir0, ir0, ir1, ir1], fill=(15, 58, 92, 255), outline=(92, 195, 242, 210), width=scale)
-        mid_pad = int(s * 0.28)
-        draw.ellipse([mid_pad, mid_pad, s - mid_pad, s - mid_pad], fill=(31, 111, 168, 220))
-        core_pad = int(s * 0.36)
-        draw.ellipse([core_pad, core_pad, s - core_pad, s - core_pad], fill=(92, 195, 242, 255))
-        pin_pad = int(s * 0.42)
-        draw.ellipse([pin_pad, pin_pad, s - pin_pad, s - pin_pad], fill=(234, 248, 255, 255))
+        max_r = s * 0.39
+        # Ambient radial nebula halo
+        draw.ellipse([cx - max_r, cy - max_r, cx + max_r, cy + max_r], fill=c_dark + (210,))
+        draw.ellipse(
+            [cx - max_r * 0.76, cy - max_r * 0.76, cx + max_r * 0.76, cy + max_r * 0.76],
+            fill=c_mid + (165,),
+        )
+        # 6 curved spiral galaxy vortex arms
+        arms = 6
+        arm_steps = 16
+        for a_idx in range(arms):
+            base_ang = (a_idx / arms) * 2.0 * math.pi
+            pts: list[tuple[float, float]] = []
+            for st in range(arm_steps):
+                f = st / (arm_steps - 1)
+                rad = (0.08 + 0.88 * f) * max_r
+                ang = base_ang + f * 1.95
+                pts.append((cx + rad * math.cos(ang), cy + rad * math.sin(ang)))
+            draw.line(pts, fill=c_bright + (210,), width=max(2, scale))
+            draw.line(pts[: arm_steps - 3], fill=c_core + (190,), width=max(1, scale // 2))
+        # Luminous galaxy core / Megatron sharp eye pupil
+        core_r = max_r * (0.40 if theme["key"] == "megatron" else 0.32)
+        draw.ellipse([cx - core_r * 1.4, cy - core_r * 1.4, cx + core_r * 1.4, cy + core_r * 1.4], fill=c_bright + (215,))
+        draw.ellipse([cx - core_r, cy - core_r, cx + core_r, cy + core_r], fill=c_core + (255,))
 
     resized = img.resize((size, size), Image.Resampling.LANCZOS)
     return ImageTk.PhotoImage(resized)
@@ -386,21 +472,11 @@ def _render_wave_photo(
     mid_y = sh / 2.0
     base_amp = amp_override if amp_override is not None else (14.5 if active else (11.5 if mic_enabled else 8.8))
     amp = float(base_amp) * scale
-    if persona == "megatron":
-        c_glow = (185, 28, 28, 120)
-        c_mid = (239, 68, 68, 210)
-        c_main = (248, 113, 113, 255)
-        c_core = (254, 226, 226, 255)
-    elif persona == "ultron":
-        c_glow = (56, 189, 248, 125)
-        c_mid = (96, 165, 250, 215)
-        c_main = (147, 197, 253, 255)
-        c_core = (239, 246, 255, 255)
-    else:
-        c_glow = (31, 111, 168, 125)
-        c_mid = (46, 143, 208, 215)
-        c_main = (92, 195, 242, 255)
-        c_core = (230, 246, 255, 255)
+    theme = _get_persona_theme(persona)
+    c_glow = _hex_rgb(theme["wave_glow"]) + (135,)
+    c_mid = _hex_rgb(theme["wave_mid"]) + (215,)
+    c_main = _hex_rgb(theme["wave_main"]) + (255,)
+    c_core = _hex_rgb(theme["wave_core"]) + (255,)
 
     # Subtle horizon filament
     draw.line([(8 * scale, mid_y), (sw - 8 * scale, mid_y)], fill=(70, 95, 125, 90), width=1)
@@ -588,15 +664,78 @@ def format_friendly_error(err: str) -> str:
     return (err or "Unknown error").strip()
 
 
+_WIN32_CACHE: dict[str, Any] = {}
+
+
+def _get_win32() -> dict[str, Any]:
+    """Return cached Win32 DLL handles with argtypes preconfigured once (eliminates per-frame ctypes setup)."""
+    if sys.platform != "win32":
+        return {}
+    if _WIN32_CACHE:
+        return _WIN32_CACHE
+    try:
+        u32 = ctypes.WinDLL("user32", use_last_error=True)
+        g32 = ctypes.WinDLL("gdi32", use_last_error=True)
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        dwm = ctypes.WinDLL("dwmapi", use_last_error=True)
+
+        u32.GetParent.argtypes = [wintypes.HWND]
+        u32.GetParent.restype = wintypes.HWND
+        u32.SetWindowPos.argtypes = [
+            wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
+            ctypes.c_int, ctypes.c_int, wintypes.UINT,
+        ]
+        u32.SetWindowPos.restype = wintypes.BOOL
+        u32.GetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int]
+        u32.GetWindowLongW.restype = ctypes.c_long
+        u32.SetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_long]
+        u32.SetWindowLongW.restype = ctypes.c_long
+        u32.IsIconic.argtypes = [wintypes.HWND]
+        u32.IsIconic.restype = wintypes.BOOL
+        u32.IsWindowVisible.argtypes = [wintypes.HWND]
+        u32.IsWindowVisible.restype = wintypes.BOOL
+        u32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+        u32.ShowWindow.restype = wintypes.BOOL
+        u32.SetWindowRgn.argtypes = [wintypes.HWND, wintypes.HRGN, wintypes.BOOL]
+        u32.SetWindowRgn.restype = ctypes.c_int
+        u32.SetWindowDisplayAffinity.argtypes = [wintypes.HWND, wintypes.DWORD]
+        u32.SetWindowDisplayAffinity.restype = wintypes.BOOL
+
+        g32.CreateRoundRectRgn.argtypes = [
+            ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+        ]
+        g32.CreateRoundRectRgn.restype = wintypes.HRGN
+        g32.CreateRectRgn.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int]
+        g32.CreateRectRgn.restype = wintypes.HRGN
+        g32.CombineRgn.argtypes = [wintypes.HRGN, wintypes.HRGN, wintypes.HRGN, ctypes.c_int]
+        g32.CombineRgn.restype = ctypes.c_int
+        g32.DeleteObject.argtypes = [wintypes.HGDIOBJ]
+        g32.DeleteObject.restype = wintypes.BOOL
+
+        k32.CreateEventW.argtypes = [wintypes.LPVOID, wintypes.BOOL, wintypes.BOOL, wintypes.LPCWSTR]
+        k32.CreateEventW.restype = wintypes.HANDLE
+        k32.SetEvent.argtypes = [wintypes.HANDLE]
+        k32.SetEvent.restype = wintypes.BOOL
+        k32.CloseHandle.argtypes = [wintypes.HANDLE]
+        k32.CloseHandle.restype = wintypes.BOOL
+        k32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+        k32.WaitForSingleObject.restype = wintypes.DWORD
+
+        _WIN32_CACHE.update({"u32": u32, "g32": g32, "k32": k32, "dwm": dwm})
+    except Exception:
+        pass
+    return _WIN32_CACHE
+
+
 def _get_top_hwnd(hwnd: int) -> int:
     """Resolve Tkinter's outer top-level Win32 wrapper HWND from its child frame HWND."""
     if sys.platform != "win32" or not hwnd:
         return int(hwnd or 0)
     try:
-        user32 = ctypes.WinDLL("user32", use_last_error=True)
-        user32.GetParent.argtypes = [wintypes.HWND]
-        user32.GetParent.restype = wintypes.HWND
-        parent = user32.GetParent(wintypes.HWND(hwnd))
+        u32 = _get_win32().get("u32")
+        if u32 is None:
+            return int(hwnd)
+        parent = u32.GetParent(wintypes.HWND(hwnd))
         return int(parent) if parent else int(hwnd)
     except Exception:
         return int(hwnd)
@@ -607,13 +746,9 @@ def signal_overlay_wake_event() -> bool:
     if sys.platform != "win32":
         return False
     try:
-        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
-        k32.CreateEventW.argtypes = [wintypes.LPVOID, wintypes.BOOL, wintypes.BOOL, wintypes.LPCWSTR]
-        k32.CreateEventW.restype = wintypes.HANDLE
-        k32.SetEvent.argtypes = [wintypes.HANDLE]
-        k32.SetEvent.restype = wintypes.BOOL
-        k32.CloseHandle.argtypes = [wintypes.HANDLE]
-        k32.CloseHandle.restype = wintypes.BOOL
+        k32 = _get_win32().get("k32")
+        if k32 is None:
+            return False
         handle = k32.CreateEventW(None, False, False, _OVERLAY_WAKE_EVENT_NAME)
         if not handle:
             return False
@@ -638,20 +773,10 @@ def apply_window_region(
     if sys.platform != "win32" or not hwnd or width <= 0 or height <= 0:
         return False
     try:
-        gdi32 = ctypes.WinDLL("gdi32", use_last_error=True)
-        user32 = ctypes.WinDLL("user32", use_last_error=True)
-        gdi32.CreateRoundRectRgn.argtypes = [
-            ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
-        ]
-        gdi32.CreateRoundRectRgn.restype = wintypes.HRGN
-        gdi32.CreateRectRgn.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int]
-        gdi32.CreateRectRgn.restype = wintypes.HRGN
-        gdi32.CombineRgn.argtypes = [wintypes.HRGN, wintypes.HRGN, wintypes.HRGN, ctypes.c_int]
-        gdi32.CombineRgn.restype = ctypes.c_int
-        gdi32.DeleteObject.argtypes = [wintypes.HGDIOBJ]
-        gdi32.DeleteObject.restype = wintypes.BOOL
-        user32.SetWindowRgn.argtypes = [wintypes.HWND, wintypes.HRGN, wintypes.BOOL]
-        user32.SetWindowRgn.restype = ctypes.c_int
+        libs = _get_win32()
+        gdi32, user32 = libs.get("g32"), libs.get("u32")
+        if gdi32 is None or user32 is None:
+            return False
 
         w = int(width)
         h = int(height)
@@ -688,15 +813,10 @@ def apply_window_chrome(hwnd: int) -> dict[str, bool]:
     if sys.platform != "win32" or not hwnd:
         return flags
     try:
-        user32 = ctypes.WinDLL("user32", use_last_error=True)
-        dwm = ctypes.WinDLL("dwmapi", use_last_error=True)
-
-        user32.GetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int]
-        user32.GetWindowLongW.restype = ctypes.c_long
-        user32.SetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_long]
-        user32.SetWindowLongW.restype = ctypes.c_long
-        user32.SetWindowDisplayAffinity.argtypes = [wintypes.HWND, wintypes.DWORD]
-        user32.SetWindowDisplayAffinity.restype = wintypes.BOOL
+        libs = _get_win32()
+        user32, dwm = libs.get("u32"), libs.get("dwm")
+        if user32 is None or dwm is None:
+            return flags
 
         target = _get_top_hwnd(hwnd)
         ex = user32.GetWindowLongW(wintypes.HWND(target), GWL_EXSTYLE)
@@ -726,11 +846,53 @@ def apply_window_chrome(hwnd: int) -> dict[str, bool]:
 
 
 class _CpuSampler:
-    """Zero-subprocess Windows CPU/RAM/Battery reader via ctypes."""
+    """Zero-blocking Windows CPU/RAM/Battery + background-cached GPU/VRAM reader."""
 
     def __init__(self) -> None:
         self._prev_idle = 0
         self._prev_total = 0
+        self._gpu_pct: int | None = None
+        self._vram_pct: int | None = None
+        self._gpu_last_probe = 0.0
+        self._gpu_probing = False
+
+    def _refresh_gpu_async(self) -> None:
+        if os.environ.get("PYTEST_CURRENT_TEST") or self._gpu_probing:
+            return
+        now = time.monotonic()
+        if now - self._gpu_last_probe < 4.5:
+            return
+        self._gpu_last_probe = now
+        self._gpu_probing = True
+
+        def _probe() -> None:
+            try:
+                kw: dict[str, Any] = {"capture_output": True, "text": True, "timeout": 1.5}
+                if sys.platform == "win32":
+                    kw["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+                proc = subprocess.run(
+                    [
+                        "nvidia-smi",
+                        "--query-gpu=utilization.gpu,memory.used,memory.total",
+                        "--format=csv,noheader,nounits",
+                    ],
+                    **kw,
+                )
+                if proc.returncode == 0 and proc.stdout.strip():
+                    line = proc.stdout.strip().splitlines()[0]
+                    parts = [p.strip() for p in line.split(",")]
+                    if len(parts) >= 3:
+                        util = int(float(parts[0]))
+                        used = float(parts[1])
+                        total = max(1.0, float(parts[2]))
+                        self._gpu_pct = max(0, min(100, util))
+                        self._vram_pct = max(0, min(100, round((used / total) * 100)))
+            except Exception:
+                pass
+            finally:
+                self._gpu_probing = False
+
+        threading.Thread(target=_probe, daemon=True).start()
 
     def sample(self) -> dict[str, Any]:
         ram_pct = 0
@@ -738,9 +900,17 @@ class _CpuSampler:
         battery_pct: int | None = None
         charging = False
         if sys.platform != "win32":
-            return {"cpu_pct": 0, "ram_pct": 0, "battery_pct": None, "charging": False}
+            return {
+                "cpu_pct": 0,
+                "ram_pct": 0,
+                "battery_pct": None,
+                "charging": False,
+                "gpu_pct": self._gpu_pct,
+                "vram_pct": self._vram_pct,
+            }
+        self._refresh_gpu_async()
         try:
-            k32 = ctypes.windll.kernel32
+            k32 = (_get_win32().get("k32")) or ctypes.windll.kernel32
 
             class _Mem(ctypes.Structure):
                 _fields_ = [
@@ -789,7 +959,14 @@ class _CpuSampler:
                 self._prev_total = total
         except Exception:
             pass
-        return {"cpu_pct": cpu_pct, "ram_pct": ram_pct, "battery_pct": battery_pct, "charging": charging}
+        return {
+            "cpu_pct": cpu_pct,
+            "ram_pct": ram_pct,
+            "battery_pct": battery_pct,
+            "charging": charging,
+            "gpu_pct": self._gpu_pct,
+            "vram_pct": self._vram_pct,
+        }
 
 
 class _ComposerText(tk.Text):
@@ -1039,6 +1216,8 @@ class DynamicIslandPill:
         self._model_popover_visible = False
         self._apps_popover_visible = False
         self._tools_popover_visible = False
+        self._persona_popover_visible = False
+        self._agent_popover_visible = False
         self._tools_pinned = False
         self._tools_hover_close_id: str | None = None
         self._tools_signature: tuple[tuple[str, str], ...] | None = None
@@ -1048,17 +1227,23 @@ class DynamicIslandPill:
         self._todo_items: list[tuple[str, bool]] = []
         self._apps_status: dict[str, Any] = {}
         self._apps_drawer_visible = False
+        self._apps_cfg_gmail_open = False
+        self._apps_cfg_cal_open = False
+        self._todo_add_open = False
+        self._right_subview = "summary"
         self._todo_vars: list[tk.BooleanVar] = []
+        self._eye_cache: dict[tuple[str, int, bool, str], Any] = {}
+        self._wave_style_key: tuple[Any, ...] | None = None
+        self._drag_anchor: tuple[int, int, int, int, bool] | None = None
         self._last_wake_seq: int = 0
         self._event_woken_at: float | None = None
         self._wake_event_handle: int = 0
         self._telemetry_ticks: int = 0
         if sys.platform == "win32" and not os.environ.get("PYTEST_CURRENT_TEST"):
             try:
-                k32 = ctypes.WinDLL("kernel32", use_last_error=True)
-                k32.CreateEventW.argtypes = [wintypes.LPVOID, wintypes.BOOL, wintypes.BOOL, wintypes.LPCWSTR]
-                k32.CreateEventW.restype = wintypes.HANDLE
-                self._wake_event_handle = int(k32.CreateEventW(None, False, False, _OVERLAY_WAKE_EVENT_NAME) or 0)
+                k32 = _get_win32().get("k32")
+                if k32 is not None:
+                    self._wake_event_handle = int(k32.CreateEventW(None, False, False, _OVERLAY_WAKE_EVENT_NAME) or 0)
             except Exception:
                 self._wake_event_handle = 0
         mic_kwargs: dict[str, Any] = {
@@ -1074,11 +1259,15 @@ class DynamicIslandPill:
         self.mic_listener = MicListener(**mic_kwargs)
 
         self.root = tk.Tk()
-        self.root.title("AURA V4 · Ultron Dynamic Island")
+        self.root.title("AURA V4 · Dynamic Island")
         self.root.overrideredirect(True)
         self.root.attributes("-topmost", True)
         self.root.configure(bg=_PALETTE["bg"])
-        # Keep opacity at 1.0 (no WS_EX_LAYERED partial alpha) so Win32 ClearType subpixel rendering stays razor-sharp
+        # Translucent frosted-glass effect (test harnesses may override to 0.0 cleanly)
+        try:
+            self.root.attributes("-alpha", 0.93)
+        except Exception:
+            pass
         _sync_tk_dpi_scaling(self.root)
 
         self._load_eye_assets()
@@ -1097,27 +1286,38 @@ class DynamicIslandPill:
         self._animate_orb()
         self._tick_telemetry()
 
+    def _get_eye_photo(self, size: int, *, shuttered: bool = False, bg_hex: str = "#111A27") -> Any:
+        theme = _get_persona_theme(getattr(self, "persona", "off"))
+        key = (theme["key"], int(size), bool(shuttered), str(bg_hex))
+        if key not in self._eye_cache:
+            self._eye_cache[key] = _render_ultron_eye_photo(
+                size, shuttered=shuttered, bg_hex=bg_hex, persona=self.persona
+            )
+        return self._eye_cache[key]
+
     def _load_eye_assets(self) -> None:
-        self._img_refs["eye_compact"] = _render_ultron_eye_photo(28, shuttered=False, bg_hex=_PALETTE["gunmetal"])
-        self._img_refs["eye_expanded"] = _render_ultron_eye_photo(44, shuttered=False, bg_hex=_PALETTE["hdr_bar"])
-        self._img_refs["eye_shuttered"] = _render_ultron_eye_photo(22, shuttered=True, bg_hex=_PALETTE["gunmetal"])
-        self._img_refs["eye_avatar"] = _render_ultron_eye_photo(22, shuttered=False, bg_hex=_PALETTE["well"])
+        self._img_refs["eye_compact"] = self._get_eye_photo(28, shuttered=False, bg_hex=_PALETTE["gunmetal"])
+        self._img_refs["eye_expanded"] = self._get_eye_photo(34, shuttered=False, bg_hex=_PALETTE["hdr_bar"])
+        self._img_refs["eye_shuttered"] = self._get_eye_photo(22, shuttered=True, bg_hex=_PALETTE["gunmetal"])
+        self._img_refs["eye_avatar"] = self._get_eye_photo(22, shuttered=False, bg_hex=_PALETTE["well"])
 
     def _build_ui(self) -> None:
         self.frame = tk.Frame(
             self.root,
             bg=_PALETTE["bg"],
-            highlightthickness=0,
+            highlightbackground=_PALETTE["border"],
+            highlightthickness=1,
         )
         self.frame.pack(fill="both", expand=True)
 
-        # Top Brow Crest Strip (shared brushed-steel trapezoid + glowing arc-blue vents)
+        # Slim top crest drag strip (hidden/subtle in compact, 6px drag handle in expanded)
         self.brow_canvas = tk.Canvas(
-            self.frame, height=12, bg=_PALETTE["bg"], highlightthickness=0, cursor="hand2"
+            self.frame, height=6, bg=_PALETTE["bg"], highlightthickness=0, cursor="hand2"
         )
         self.brow_canvas.pack(side="top", fill="x", padx=2)
-        self.brow_canvas.bind("<Button-1>", self._on_pill_click)
+        self.brow_canvas.bind("<ButtonPress-1>", self._on_pill_press)
         self.brow_canvas.bind("<B1-Motion>", self._on_pill_drag)
+        self.brow_canvas.bind("<ButtonRelease-1>", self._on_pill_release)
 
         # --- State 02: Shuttered Standby Bar (220x32 top-flush) ---
         self.shuttered_bar = tk.Frame(self.frame, bg=_PALETTE["gunmetal"])
@@ -1128,7 +1328,7 @@ class DynamicIslandPill:
         if self._img_refs.get("eye_shuttered") is not None:
             self.shutter_eye_canvas.create_image(13, 13, image=self._img_refs["eye_shuttered"])
         else:
-            self.shutter_eye_canvas.create_oval(2, 2, 24, 24, outline="#6B7587", fill="#13161B", width=2)
+            self.shutter_eye_canvas.create_oval(2, 2, 24, 24, outline="#6B7587", fill="#0B111A", width=2)
             self.shutter_eye_canvas.create_line(7, 13, 19, 13, fill="#8FA0B5", width=2)
 
         self.shutter_lbl = tk.Label(
@@ -1150,48 +1350,76 @@ class DynamicIslandPill:
         self.shutter_eye_canvas.bind("<Button-1>", lambda _e: self.wake_from_shutter())
         self.shutter_lbl.bind("<Button-1>", lambda _e: self.wake_from_shutter())
         self.wake_switch_canvas.bind("<Button-1>", lambda _e: self.wake_from_shutter())
+        self.shuttered_bar.bind("<ButtonPress-1>", self._on_pill_press)
         self.shuttered_bar.bind("<B1-Motion>", self._on_pill_drag)
 
         # --- Shared Capsule Header (Compact 01 + Expanded 03) ---
         self.header = tk.Frame(
             self.frame,
             bg=_PALETTE["gunmetal"],
-            height=54,
+            height=48,
             highlightbackground=_PALETTE["border"],
             highlightthickness=1,
         )
-        self.header.pack(side="top", fill="x", padx=8, pady=(0, 4))
+        self.header.pack(side="top", fill="x", padx=8, pady=(0, 3))
         self.header.pack_propagate(False)
 
-        # Ultron Eye Core (keeps orb_outer + orb_core IDs for animations/tests)
+        # Spiral Galaxy / Energy Core Orb
         self.orb_canvas = tk.Canvas(
-            self.header, width=54, height=54, bg=_PALETTE["gunmetal"], highlightthickness=0, cursor="hand2"
+            self.header, width=40, height=40, bg=_PALETTE["gunmetal"], highlightthickness=0, cursor="hand2"
         )
         self.orb_canvas.pack(side="left", padx=(6, 4))
         self._orb_eye_item = None
         if self._img_refs.get("eye_compact") is not None:
-            self._orb_eye_item = self.orb_canvas.create_image(27, 27, image=self._img_refs["eye_compact"])
-        self.orb_outer = self.orb_canvas.create_oval(7, 7, 47, 47, outline=_PALETTE["accent"], width=1.6)
-        self.orb_core = self.orb_canvas.create_oval(23, 23, 31, 31, fill=_PALETTE["accent"], outline="")
+            self._orb_eye_item = self.orb_canvas.create_image(20, 20, image=self._img_refs["eye_compact"])
+        self.orb_outer = self.orb_canvas.create_oval(5, 5, 35, 35, outline=_PALETTE["accent"], width=1.4)
+        self.orb_core = self.orb_canvas.create_oval(17, 17, 23, 23, fill=_PALETTE["accent"], outline="")
 
-        # Unified Right Header Cluster packed BEFORE expanding middle wave_stack so it is never squeezed at high DPI
+        # Expanded Left Brand Cluster: AURA V4 + Persona Theme Switcher (Cyber Blue / Ultron Mode / Megatron)
+        self.hdr_brand = tk.Frame(self.header, bg=_PALETTE["hdr_bar"])
+        self.aura_title_lbl = tk.Label(
+            self.hdr_brand,
+            text="AURA V4",
+            bg=_PALETTE["hdr_bar"],
+            fg="#F1F6FC",
+            font=(_TECH_FONT, 10, "bold"),
+            cursor="hand2",
+        )
+        self.aura_title_lbl.pack(side="left", padx=(2, 4))
+        self.persona_btn = self._mk_btn(
+            self.hdr_brand,
+            "Cyber Blue ▾",
+            self._open_persona_popover,
+            bg=_PALETTE["pill_active_bg"],
+            fg=_PALETTE["arc_text"],
+            hover_bg=_PALETTE["card_hi"],
+            hover_fg="#FFFFFF",
+            padx=5,
+            pady=2,
+            border_color=_PALETTE["arc_border"],
+        )
+        self.persona_btn.configure(font=(_UI_FONT, 8, "bold"))
+        self.persona_btn.pack(side="left")
+
+        # Unified Right Header Cluster packed BEFORE expanding middle region so right controls never squeeze
         self.hdr_right = tk.Frame(self.header, bg=_PALETTE["gunmetal"])
         self.hdr_right.pack(side="right", padx=(2, 6))
 
         # Pack Shutdown button FIRST on the right edge so it always renders visibly in Compact & Expanded states
         self.shutdown_btn = self._mk_btn(
             self.hdr_right,
-            "⏻ Off",
+            "⏻",
             self.shutdown_app,
             bg=_PALETTE["danger_bg"],
             fg=_PALETTE["danger_fg"],
             hover_bg=_PALETTE["danger_hover"],
             hover_fg="#FFFFFF",
-            padx=6,
+            padx=7,
             pady=2,
-            border_color="#E11D48",
+            border_color="#F87171",
         )
-        self.shutdown_btn.pack(side="right", padx=(3, 0))
+        self.shutdown_btn.configure(font=(_UI_FONT, 8, "bold"))
+        self.shutdown_btn.pack(side="right", padx=(4, 0))
 
         self.compact_voice_btn = self._mk_btn(
             self.hdr_right,
@@ -1201,22 +1429,35 @@ class DynamicIslandPill:
             fg=_PALETTE["steel"],
             hover_bg=_PALETTE["titanium"],
             hover_fg=_PALETTE["accent"],
-            padx=6,
-            pady=2,
-            border_color="#485364",
+            padx=5,
+            pady=1,
+            border_color="#354962",
         )
-        self.compact_voice_btn.pack(side="left", padx=(0, 4))
+        self.compact_voice_btn.pack(side="left", padx=(0, 3))
+
+        self.compact_rw_btn = self._mk_btn(
+            self.hdr_right,
+            "⚡ RO",
+            self._toggle_mode,
+            bg=_PALETTE["pill_active_bg"],
+            fg=_PALETTE["arc_text"],
+            hover_bg=_PALETTE["card_hi"],
+            hover_fg="#FFFFFF",
+            padx=5,
+            pady=1,
+            border_color=_PALETTE["arc_border"],
+        )
+        self.compact_rw_btn.configure(font=(_UI_FONT, 8, "bold"))
 
         self.mic_lbl_hdr = tk.Label(
             self.hdr_right, text="Mic", bg=_PALETTE["gunmetal"], fg="#DCE4EE", font=(_UI_FONT, 8, "bold")
         )
-        self.mic_lbl_hdr.pack(side="left", padx=(0, 3))
+        self.mic_lbl_hdr.pack(side="left", padx=(0, 2))
 
-        # Preserve attribute name pill.capsule_mic_btn (Canvas toggle switch)
         self.capsule_mic_btn = tk.Canvas(
             self.hdr_right, width=44, height=24, bg=_PALETTE["gunmetal"], highlightthickness=0, cursor="hand2"
         )
-        self.capsule_mic_btn.pack(side="left", padx=(0, 4))
+        self.capsule_mic_btn.pack(side="left", padx=(0, 3))
         self._img_refs["cap_sw"] = self._draw_switch(self.capsule_mic_btn, active=False, bg_hex=_PALETTE["gunmetal"])
         self.capsule_mic_btn.bind("<Button-1>", lambda _e: self.toggle_mic())
 
@@ -1229,19 +1470,34 @@ class DynamicIslandPill:
         self.stop_square = self.stop_canvas.create_rectangle(7, 7, 15, 15, fill="#E8EDF4", outline="#E8EDF4")
         self.stop_canvas.bind("<Button-1>", lambda _e: self.stop_active())
 
-        # Packed in top-right corner during expanded mode for instant pause/stop control
+        # Expanded-only top-right cluster: ⚡ RW Mode toggle pill + ⊞ Apps + ⏸ Pause + ◐ + Off
+        self.hdr_rw_btn = self._mk_btn(
+            self.hdr_right,
+            "⚡ RW Mode: OFF",
+            self._toggle_mode,
+            bg=_PALETTE["pill_active_bg"],
+            fg=_PALETTE["arc_text"],
+            hover_bg=_PALETTE["card_hi"],
+            hover_fg="#FFFFFF",
+            padx=5,
+            pady=2,
+            border_color=_PALETTE["arc_border"],
+        )
+        self.hdr_rw_btn.configure(font=(_UI_FONT, 8, "bold"))
+
         self.hdr_stop_btn = self._mk_btn(
             self.hdr_right,
             "⏸ Pause",
             self.stop_active,
-            bg=_PALETTE["card_hi"],
-            fg=_PALETTE["text"],
+            bg=_PALETTE["card"],
+            fg=_PALETTE["steel"],
             hover_bg=_PALETTE["danger_bg"],
             hover_fg=_PALETTE["danger_fg"],
-            padx=8,
+            padx=4,
             pady=2,
-            border_color="#7A899D",
+            border_color=_PALETTE["border"],
         )
+        self.hdr_stop_btn.configure(font=(_UI_FONT, 8, "bold"))
 
         self.apps_btn = self._mk_btn(
             self.hdr_right,
@@ -1251,55 +1507,121 @@ class DynamicIslandPill:
             fg=_PALETTE["arc_text"],
             hover_bg=_PALETTE["pill_active_bg"],
             hover_fg="#FFFFFF",
-            padx=6,
+            padx=4,
             pady=2,
-            border_color=_PALETTE["arc_border"],
+            border_color=_PALETTE["border_hi"],
         )
+        self.apps_btn.configure(font=(_UI_FONT, 8, "bold"))
 
         self.shutter_btn = self._mk_btn(
             self.hdr_right,
             "◐",
             self.enter_shuttered,
-            bg=_PALETTE["card_hi"],
+            bg=_PALETTE["card"],
             fg="#DCE4EE",
             hover_bg=_PALETTE["titanium"],
             hover_fg=_PALETTE["accent"],
-            padx=6,
+            padx=3,
             pady=2,
-            border_color="#7A899D",
+            border_color=_PALETTE["border"],
         )
+        self.shutter_btn.configure(font=(_UI_FONT, 8, "bold"))
 
-        # Arc-Blue Filament Waveform & Subtitle Stack (packed AFTER hdr_right so right controls keep exact width)
+        # Expanded Center Frosted Nav Capsule: Ask Aura | Agents | Hub & Focus | Web UI | Jarvis
+        self.nav_pill_bar = tk.Frame(
+            self.header,
+            bg=_PALETTE["well"],
+            highlightbackground=_PALETTE["border"],
+            highlightthickness=1,
+            padx=2,
+            pady=2,
+        )
+        for tab_key, tab_title in (
+            ("chat", "Ask Aura"),
+            ("agents", "Agents"),
+            ("deck", "Hub & Focus"),
+        ):
+            tbtn = tk.Button(
+                self.nav_pill_bar,
+                text=tab_title,
+                command=lambda k=tab_key: self.switch_tab(k),
+                bg=_PALETTE["well"],
+                fg="#DCE4EE",
+                activebackground=_PALETTE["pill_active_bg"],
+                activeforeground=_PALETTE["arc_text"],
+                relief="flat",
+                bd=0,
+                highlightthickness=1,
+                highlightbackground=_PALETTE["well"],
+                font=(_UI_FONT, 8, "bold"),
+                padx=4,
+                pady=2,
+                cursor="hand2",
+            )
+            tbtn.pack(side="left", padx=1)
+            self.tab_btns[tab_key] = tbtn
+
+        self.web_ui_btn = self._mk_btn(
+            self.nav_pill_bar,
+            "Web UI",
+            lambda: webbrowser.open(self.bridge.base_url),
+            bg=_PALETTE["well"],
+            fg=_PALETTE["steel"],
+            hover_bg=_PALETTE["card_hi"],
+            hover_fg="#FFFFFF",
+            padx=4,
+            pady=2,
+        )
+        self.web_ui_btn.configure(font=(_UI_FONT, 8, "bold"))
+        self.web_ui_btn.pack(side="left", padx=1)
+
+        self.jarvis_tab_btn = self._mk_btn(
+            self.nav_pill_bar,
+            "Jarvis",
+            lambda: (self._select_persona("jarvis"), self.switch_tab("chat")),
+            bg=_PALETTE["well"],
+            fg=_PALETTE["steel"],
+            hover_bg=_PALETTE["card_hi"],
+            hover_fg=_PALETTE["accent"],
+            padx=4,
+            pady=2,
+        )
+        self.jarvis_tab_btn.configure(font=(_UI_FONT, 8, "bold"))
+        self.jarvis_tab_btn.pack(side="left", padx=1)
+
+        # Native High-FPS Oscilloscope Waveform Stack (Compact Pill center, 0 PIL allocations/frame)
         self.wave_stack = tk.Frame(self.header, bg=_PALETTE["gunmetal"])
-        self.wave_stack.pack(side="left", fill="both", expand=True, padx=(4, 4))
+        self.wave_stack.pack(side="left", fill="both", expand=True, padx=(2, 2))
 
         self.wave_canvas = tk.Canvas(
-            self.wave_stack, width=172, height=36, bg=_PALETTE["gunmetal"], highlightthickness=0, cursor="hand2"
+            self.wave_stack, width=104, height=30, bg=_PALETTE["gunmetal"], highlightthickness=0, cursor="hand2"
         )
         self.wave_canvas.pack(side="top", expand=True)
-        self._wave_img_item = self.wave_canvas.create_image(86, 18)
-        # Keep dual filament vectors + glow + compatibility bars for fallback / tests
-        self._fil_line_dim = self.wave_canvas.create_line(0, 18, 172, 18, fill=_PALETTE["deep_blue"], width=1.6, smooth=True)
-        self._fil_line_main = self.wave_canvas.create_line(0, 18, 172, 18, fill="#8FD3F4", width=2.0, smooth=True)
-        self._fil_glow = self.wave_canvas.create_oval(78, 10, 94, 26, outline=_PALETTE["accent"], width=1)
-        self._fil_dot = self.wave_canvas.create_oval(84, 16, 88, 20, fill="#E6F6FF", outline="")
+        self._wave_img_item = self.wave_canvas.create_image(52, 15)
+        self.wave_canvas.itemconfigure(self._wave_img_item, state="hidden")
+        self._wave_axis = self.wave_canvas.create_line(4, 15, 100, 15, fill="#2A3C52", width=1)
         self._wave_bars = [
-            self.wave_canvas.create_rectangle(-10, -10, -8, -8, fill="#5CC3F2", outline="")
-            for _ in range(4)
+            self.wave_canvas.create_rectangle(-10, -10, -8, -8, fill=_PALETTE["accent"], outline="")
+            for _ in range(28)
         ]
+        self._fil_line_dim = self.wave_canvas.create_line(0, 15, 104, 15, fill=_PALETTE["deep_blue"], width=1.4, smooth=True)
+        self._fil_line_main = self.wave_canvas.create_line(0, 15, 104, 15, fill="#9AE2FF", width=1.6, smooth=True)
+        self._fil_glow = self.wave_canvas.create_oval(47, 10, 57, 20, outline=_PALETTE["accent"], width=1)
+        self._fil_dot = self.wave_canvas.create_oval(50, 13, 54, 17, fill="#FFFFFF", outline="")
 
         self.pill_label = tk.Label(
             self.wave_stack,
-            text="ULTRON VOICE · STANDBY",
+            text="AURA V4 · READY",
             bg=_PALETTE["hdr_bar"],
             fg=_PALETTE["steel"],
             font=(_TECH_FONT, 8, "bold"),
             cursor="hand2",
         )
 
-        for w in (self.orb_canvas, self.wave_canvas, self.pill_label, self.wave_stack):
-            w.bind("<Button-1>", self._on_pill_click)
+        for w in (self.orb_canvas, self.wave_canvas, self.pill_label, self.wave_stack, self.aura_title_lbl):
+            w.bind("<ButtonPress-1>", self._on_pill_press)
             w.bind("<B1-Motion>", self._on_pill_drag)
+            w.bind("<ButtonRelease-1>", self._on_pill_release)
         for hw in (self.frame, self.header, self.orb_canvas, self.wave_canvas):
             hw.bind("<Enter>", lambda _e: setattr(self, "_orb_hover", True))
             hw.bind("<Leave>", lambda _e: setattr(self, "_orb_hover", False))
@@ -1307,72 +1629,69 @@ class DynamicIslandPill:
         # --- Expanded Notch Drawer (State 03: 960x520 top-flush) ---
         self.drawer = tk.Frame(self.frame, bg=_PALETTE["bg"])
 
-        # Bottom Floating Navigation & Live Telemetry Bar (no duplicate Quit button)
-        self.tab_bar = tk.Frame(self.drawer, bg=_PALETTE["bg"], height=36)
-        self.tab_bar.pack(side="bottom", fill="x", padx=12, pady=(2, 6))
+        # Bottom Telemetry Strip (matches ● Ollama · CPU · RAM · GPU · VRAM | ● RW: Read-Write · Battery)
+        self.tab_bar = tk.Frame(self.drawer, bg=_PALETTE["bg"], height=26)
+        self.tab_bar.pack(side="bottom", fill="x", padx=12, pady=(2, 5))
         self.tab_bar.pack_propagate(False)
 
-        tab_track = tk.Frame(self.tab_bar, bg=_PALETTE["bg"])
-        tab_track.pack(side="left")
-        for tab_key, tab_title in (
-            ("chat", "Ask Aura"),
-            ("agents", "Agents"),
-            ("deck", "Hub"),
-        ):
-            tbtn = tk.Button(
-                tab_track,
-                text=tab_title,
-                command=lambda k=tab_key: self.switch_tab(k),
-                bg=_PALETTE["bg"],
-                fg="#DCE4EE",
-                activebackground=_PALETTE["pill_active_bg"],
-                activeforeground=_PALETTE["arc_text"],
-                relief="flat",
-                bd=0,
-                highlightthickness=1,
-                highlightbackground="#5A667A",
-                font=(_UI_FONT, 9, "bold"),
-                padx=12,
-                pady=3,
-                cursor="hand2",
-            )
-            tbtn.pack(side="left", padx=(0, 6))
-            self.tab_btns[tab_key] = tbtn
-
-        self._mk_btn(
-            tab_track,
-            "Web UI",
-            lambda: webbrowser.open(self.bridge.base_url),
+        tel_left = tk.Frame(self.tab_bar, bg=_PALETTE["bg"])
+        tel_left.pack(side="left")
+        self.ollama_btn = self._mk_btn(
+            tel_left,
+            "● Ollama",
+            self._wake_ollama,
             bg=_PALETTE["bg"],
-            fg="#DCE4EE",
-            padx=10,
-            pady=3,
-            border_color="#5A667A",
-        ).pack(side="left", padx=(0, 6))
-
-        self.mode_btn = self._mk_btn(
-            tab_track, "RO", self._toggle_mode, bg=_PALETTE["well"], fg=_PALETTE["blue"], padx=9, pady=3, border_color="#485364"
+            fg=_PALETTE["accent"],
+            hover_bg=_PALETTE["card"],
+            hover_fg="#FFFFFF",
+            padx=4,
+            pady=1,
         )
-        self.mode_btn.pack(side="left", padx=(0, 4))
+        self.ollama_btn.configure(font=(_MONO_FONT, 8, "bold"))
+        self.ollama_btn.pack(side="left", padx=(0, 4))
 
         self.capsule_tel_lbl = tk.Label(
-            self.tab_bar,
-            text="CPU 2%  RAM 60%  AC Power · Click outside or Esc to hide",
+            tel_left,
+            text="· CPU: 0% · RAM: 0%",
             bg=_PALETTE["bg"],
             fg=_PALETTE["muted"],
             font=(_MONO_FONT, 8),
         )
-        self.capsule_tel_lbl.pack(side="right", padx=(6, 0))
+        self.capsule_tel_lbl.pack(side="left")
 
-        # Kept for compatibility across methods
+        tel_right = tk.Frame(self.tab_bar, bg=_PALETTE["bg"])
+        tel_right.pack(side="right")
+        self.mode_btn = self._mk_btn(
+            tel_right,
+            "● RO: Read-Only",
+            self._toggle_mode,
+            bg=_PALETTE["bg"],
+            fg=_PALETTE["blue"],
+            hover_bg=_PALETTE["card"],
+            hover_fg="#FFFFFF",
+            padx=6,
+            pady=1,
+        )
+        self.mode_btn.configure(font=(_MONO_FONT, 8, "bold"))
+        self.mode_btn.pack(side="left", padx=(0, 6))
+
+        self.bat_pill_lbl = tk.Label(
+            tel_right,
+            text="AC Power",
+            bg=_PALETTE["bg"],
+            fg=_PALETTE["muted"],
+            font=(_MONO_FONT, 8),
+        )
+        self.bat_pill_lbl.pack(side="left")
         self.clock_lbl = tk.Label(self.tab_bar, text="", bg=_PALETTE["bg"], fg=_PALETTE["muted"])
-        self.bat_pill_lbl = tk.Label(self.tab_bar, text="", bg=_PALETTE["bg"], fg=_PALETTE["muted"])
 
         # Main Panel Host
         self.panel_host = tk.Frame(self.drawer, bg=_PALETTE["bg"])
         self.panel_host.pack(fill="both", expand=True, padx=12, pady=(2, 0))
 
         self._build_menus()
+        self._build_persona_popover()
+        self._build_agent_popover()
         self._build_model_popover()
         self._build_apps_popover()
         self._build_tools_popover()
@@ -1413,15 +1732,196 @@ class DynamicIslandPill:
         )
         self._populate_model_menu()
 
+    def _build_persona_popover(self) -> None:
+        """Floating top-left Theme & Voice Persona dropdown (Cyber Blue / Ultron Mode / Megatron Mode)."""
+        self.persona_popover = tk.Frame(
+            self.frame,
+            bg="#121C2A",
+            highlightbackground=_PALETTE["border_hi"],
+            highlightthickness=1,
+            padx=6,
+            pady=6,
+        )
+        self._persona_rows: dict[str, tk.Button] = {}
+        choices = (
+            ("jarvis", "✦  Cyber Blue (Default)"),
+            ("ultron", "✦  Ultron Mode (Golden Galaxy)"),
+            ("megatron", "✦  Megatron Mode (Crimson Core)"),
+            ("off", "🔇 Voice: Off (Cyber Blue)"),
+        )
+        for p_key, p_lbl in choices:
+            btn = tk.Button(
+                self.persona_popover,
+                text=p_lbl,
+                command=lambda k=p_key: self._select_persona(k),
+                bg="#121C2A",
+                fg=_PALETTE["steel"],
+                activebackground=_PALETTE["pill_active_bg"],
+                activeforeground="#FFFFFF",
+                relief="flat",
+                bd=0,
+                font=(_UI_FONT, 9, "bold"),
+                anchor="w",
+                padx=10,
+                pady=5,
+                width=27,
+                cursor="hand2",
+            )
+            btn.pack(fill="x", pady=1)
+            self._persona_rows[p_key] = btn
+
+    def _open_persona_popover(self) -> None:
+        if not self.expanded:
+            self.expand()
+        self._close_apps_popover()
+        self._close_model_popover()
+        self._close_tools_popover()
+        self._close_agent_popover()
+        if getattr(self, "_persona_popover_visible", False):
+            self._close_persona_popover()
+            return
+        theme = _get_persona_theme(self.persona)
+        self.persona_popover.configure(highlightbackground=theme["arc_border"])
+        for p_key, btn in getattr(self, "_persona_rows", {}).items():
+            sel = p_key == self.persona
+            pt = _get_persona_theme(p_key)
+            btn.configure(
+                bg=pt["pill_bg"] if sel else "#121C2A",
+                fg=pt["pill_fg"] if sel else _PALETTE["steel"],
+            )
+        try:
+            self.frame.update_idletasks()
+            bx = max(12, self.persona_btn.winfo_rootx() - self.frame.winfo_rootx())
+            by = max(44, self.header.winfo_height() + 6)
+        except Exception:
+            bx, by = 110, 54
+        self._persona_popover_visible = True
+        self.persona_popover.place(in_=self.frame, x=bx, y=by)
+        self.persona_popover.lift()
+
+    def _close_persona_popover(self) -> None:
+        if getattr(self, "_persona_popover_visible", False):
+            self._persona_popover_visible = False
+            try:
+                self.persona_popover.place_forget()
+            except Exception:
+                pass
+
+    def _select_persona(self, target: str) -> None:
+        self._close_persona_popover()
+        norm = target if target in _PERSONA_CYCLE else "jarvis"
+        self.persona = norm
+        self._apply_persona_theme()
+        self._update_header()
+
+        def _job() -> None:
+            try:
+                res = self.bridge.set_voice(norm)
+                st = res.get("status")
+                if st:
+                    self._schedule_ui(lambda: self._apply_status(st))
+            except Exception as exc:
+                self._schedule_ui(lambda: self._append_rich([(f"Voice error: {exc}\n", "err_body")]))
+
+        threading.Thread(target=_job, daemon=True).start()
+
+    def _apply_persona_theme(self) -> None:
+        """Restyle orb sprites, mode badge, borders, and accents instantaneously for Cyber Blue / Ultron / Megatron."""
+        theme = _get_persona_theme(self.persona)
+        self._wave_style_key = None
+        try:
+            self._load_eye_assets()
+            if self._orb_eye_item is not None:
+                eye_key = "eye_expanded" if self.expanded else "eye_compact"
+                if self._img_refs.get(eye_key) is not None:
+                    self.orb_canvas.itemconfigure(self._orb_eye_item, image=self._img_refs[eye_key])
+            self.orb_canvas.itemconfigure(self.orb_outer, outline=theme["accent"])
+            self.orb_canvas.itemconfigure(self.orb_core, fill=theme["bright"])
+            self.frame.configure(highlightbackground=theme["border"])
+            self.header.configure(highlightbackground=theme["border"])
+            if hasattr(self, "persona_btn"):
+                self.persona_btn.configure(
+                    text=theme["mode_label"],
+                    bg=theme["pill_bg"],
+                    fg=theme["pill_fg"],
+                    highlightbackground=theme["arc_border"],
+                )
+            active_tab = getattr(self, "active_tab", "chat")
+            for key, btn in self.tab_btns.items():
+                is_act = key == active_tab
+                btn.configure(
+                    bg=theme["pill_bg"] if is_act else _PALETTE["well"],
+                    fg=theme["pill_fg"] if is_act else "#C8D5E4",
+                    highlightbackground=theme["arc_border"] if is_act else _PALETTE["well"],
+                )
+            if hasattr(self, "jarvis_tab_btn"):
+                j_act = self.persona != "off"
+                self.jarvis_tab_btn.configure(
+                    fg=theme["accent"] if j_act else _PALETTE["steel"],
+                )
+        except Exception:
+            pass
+
+    def _build_agent_popover(self) -> None:
+        """Compact upward @agent selector popup anchored above @auto button."""
+        self.agent_popover = tk.Frame(
+            self.frame,
+            bg="#121C2A",
+            highlightbackground=_PALETTE["border_hi"],
+            highlightthickness=1,
+            padx=6,
+            pady=6,
+        )
+        self._agent_pop_rows: dict[str, tk.Button] = {}
+        for lbl, role_key in (
+            ("@planner", "planner"),
+            ("@coder", "coder"),
+            ("@researcher", "researcher"),
+            ("@gmail", "gmail"),
+            ("@calendar", "calendar"),
+            ("@auto", "auto"),
+        ):
+            rbtn = tk.Button(
+                self.agent_popover,
+                text=lbl,
+                command=lambda k=lbl, r=role_key: self._pick_agent_from_popover(k, r),
+                bg="#121C2A",
+                fg=_PALETTE["text"],
+                activebackground=_PALETTE["pill_active_bg"],
+                activeforeground="#FFFFFF",
+                relief="flat",
+                bd=0,
+                font=(_UI_FONT, 9, "bold"),
+                anchor="w",
+                padx=10,
+                pady=4,
+                width=14,
+                cursor="hand2",
+            )
+            rbtn.pack(fill="x", pady=1)
+            self._agent_pop_rows[lbl] = rbtn
+
+    def _close_agent_popover(self) -> None:
+        if getattr(self, "_agent_popover_visible", False):
+            self._agent_popover_visible = False
+            try:
+                self.agent_popover.place_forget()
+            except Exception:
+                pass
+
+    def _pick_agent_from_popover(self, label: str, role_key: str) -> None:
+        self._close_agent_popover()
+        self._on_header_pill_click(label, role_key)
+
     def _build_model_popover(self) -> None:
         """Create the crisp in-island floating Model Selector popover matching Ultron HUD."""
         self.model_popover = tk.Frame(
             self.frame,
-            bg="#232832",
+            bg="#121C2A",
             highlightbackground=_PALETTE["arc_border"],
             highlightthickness=1,
         )
-        self._model_popover_body = tk.Frame(self.model_popover, bg="#232832")
+        self._model_popover_body = tk.Frame(self.model_popover, bg="#121C2A")
         self._model_popover_body.pack(fill="both", expand=True, padx=6, pady=6)
         self._populate_model_popover()
 
@@ -1450,7 +1950,7 @@ class DynamicIslandPill:
         hdr = tk.Label(
             self._model_popover_body,
             text="ACTIVE MODEL / PROVIDER",
-            bg="#232832",
+            bg="#121C2A",
             fg=_PALETTE["muted"],
             font=(_TECH_FONT, 8, "bold"),
             anchor="w",
@@ -1460,7 +1960,7 @@ class DynamicIslandPill:
         hdr.pack(fill="x")
         for spec, disp in self._collect_model_choices():
             selected = spec == self.active_model_name
-            r_bg = _PALETTE["pill_active_bg"] if selected else "#232832"
+            r_bg = _PALETTE["pill_active_bg"] if selected else "#121C2A"
             r_fg = "#FFFFFF" if selected else _PALETTE["steel"]
             prefix = "● " if selected else "   "
             row = tk.Button(
@@ -1494,49 +1994,39 @@ class DynamicIslandPill:
             self.model_popover.place_forget()
 
     def _build_apps_popover(self) -> None:
+        """Compact Top-Right Frosted Apps Dropdown (Gmail / Google Calendar toggles + Configuration + MCP)."""
         self.apps_popover = tk.Frame(
-            self.root,
-            bg=_PALETTE["bg"],
+            self.frame,
+            bg="#121C2A",
             highlightbackground=_PALETTE["arc_border"],
             highlightthickness=1,
-            padx=12,
-            pady=10,
+            padx=10,
+            pady=8,
         )
-        hdr = tk.Frame(self.apps_popover, bg=_PALETTE["bg"])
-        hdr.pack(fill="x", pady=(0, 8))
+        hdr = tk.Frame(self.apps_popover, bg="#121C2A")
+        hdr.pack(fill="x", pady=(0, 6))
 
-        title_col = tk.Frame(hdr, bg=_PALETTE["bg"])
-        title_col.pack(side="left")
         tk.Label(
-            title_col,
-            text="APPS & CONNECTORS",
-            bg=_PALETTE["bg"],
+            hdr,
+            text="APPS",
+            bg="#121C2A",
             fg=_PALETTE["arc_text"],
-            font=(_TECH_FONT, 10, "bold"),
-        ).pack(anchor="w")
-        tk.Label(
-            title_col,
-            text="Manage Workspace integrations, Cloud providers & active MCP plugins",
-            bg=_PALETTE["bg"],
-            fg=_PALETTE["muted"],
-            font=(_UI_FONT, 8),
-        ).pack(anchor="w")
+            font=(_TECH_FONT, 9, "bold"),
+        ).pack(side="left")
 
-        hdr_right = tk.Frame(hdr, bg=_PALETTE["bg"])
-        hdr_right.pack(side="right")
         self._apps_filter_var = tk.StringVar(value="")
         self._apps_cat_filter = "all"
         self._apps_search_entry = tk.Entry(
-            hdr_right,
+            hdr,
             textvariable=self._apps_filter_var,
             bg=_PALETTE["well"],
             fg=_PALETTE["text"],
             insertbackground=_PALETTE["accent"],
             relief="flat",
             highlightthickness=1,
-            highlightbackground="#485364",
-            width=22,
-            font=(_UI_FONT, 9),
+            highlightbackground=_PALETTE["border"],
+            width=16,
+            font=(_UI_FONT, 8),
         )
         self._apps_search_entry.insert(0, "Search apps & plugins...")
         self._apps_search_entry.configure(fg=_PALETTE["muted"])
@@ -1550,57 +2040,62 @@ class DynamicIslandPill:
             else None,
         )
         self._apps_search_entry.bind("<KeyRelease>", lambda _e: self._filter_apps_cards())
-        self._apps_search_entry.pack(side="left", padx=(0, 8), ipady=3)
+        self._apps_search_entry.pack(side="left", padx=(8, 4), ipady=2)
 
+        self._mk_btn(
+            hdr,
+            "✕",
+            self._close_apps_popover,
+            bg="#121C2A",
+            fg=_PALETTE["muted"],
+            hover_bg=_PALETTE["card"],
+            hover_fg="#FFFFFF",
+            padx=4,
+            pady=0,
+        ).pack(side="right")
+
+        cat_row = tk.Frame(self.apps_popover, bg="#121C2A")
+        cat_row.pack(fill="x", pady=(0, 6))
         self._apps_cat_btns: dict[str, tk.Button] = {}
         for c_key, c_lbl in (("all", "All"), ("connected", "Connected"), ("mcp", "MCP")):
             cbtn = self._mk_btn(
-                hdr_right,
+                cat_row,
                 c_lbl,
                 lambda k=c_key: self._set_apps_cat_filter(k),
                 bg=_PALETTE["pill_active_bg"] if c_key == "all" else _PALETTE["well"],
                 fg="#FFFFFF" if c_key == "all" else _PALETTE["steel"],
-                padx=8,
-                pady=2,
-                border_color=_PALETTE["arc_border"] if c_key == "all" else "#485364",
+                padx=7,
+                pady=1,
+                border_color=_PALETTE["arc_border"] if c_key == "all" else _PALETTE["border"],
             )
+            cbtn.configure(font=(_UI_FONT, 8, "bold"))
             cbtn.pack(side="left", padx=(0, 4))
             self._apps_cat_btns[c_key] = cbtn
 
-        self._mk_btn(
-            hdr_right,
-            "✕ Close",
-            self._close_apps_popover,
-            bg=_PALETTE["card"],
-            fg=_PALETTE["text"],
-            padx=8,
-            pady=2,
-            border_color="#5A667A",
-        ).pack(side="left", padx=(6, 0))
-
-        self._apps_grid = tk.Frame(self.apps_popover, bg=_PALETTE["bg"])
+        self._apps_grid = tk.Frame(self.apps_popover, bg="#121C2A")
         self._apps_grid.pack(fill="both", expand=True)
-        self._apps_grid.columnconfigure(0, weight=1, uniform="appcol")
-        self._apps_grid.columnconfigure(1, weight=1, uniform="appcol")
+        self._apps_grid.columnconfigure(0, weight=1)
 
         self.apps_gmail_var = tk.BooleanVar(value=True)
         self.apps_cal_var = tk.BooleanVar(value=True)
         self._apps_cards: list[tuple[tk.Frame, str, str, int, int, int]] = []
 
-        # --- Card 1: Gmail Connector ---
+        # --- Row 1: Gmail + Right Switch ---
         gmail_card = tk.Frame(
             self._apps_grid,
             bg=_PALETTE["panel_mid"],
-            highlightbackground="#556173",
+            highlightbackground=_PALETTE["border"],
             highlightthickness=1,
-            padx=12,
-            pady=10,
+            padx=8,
+            pady=6,
         )
-        gmail_card.grid(row=0, column=0, sticky="nsew", padx=(0, 6), pady=(0, 8))
         g_hdr = tk.Frame(gmail_card, bg=_PALETTE["panel_mid"])
-        g_hdr.pack(fill="x", pady=(0, 4))
+        g_hdr.pack(fill="x")
         tk.Label(
-            g_hdr, text="✉  Gmail", bg=_PALETTE["panel_mid"], fg="#E8EDF4", font=(_UI_FONT, 10, "bold")
+            g_hdr, text="M", bg="#B91C1C", fg="#FFFFFF", font=(_UI_FONT, 7, "bold"), padx=4, pady=1
+        ).pack(side="left", padx=(0, 6))
+        tk.Label(
+            g_hdr, text="Gmail", bg=_PALETTE["panel_mid"], fg="#EAF1F9", font=(_UI_FONT, 9, "bold")
         ).pack(side="left")
         self._apps_gmail_sw = tk.Canvas(
             g_hdr, width=44, height=24, bg=_PALETTE["panel_mid"], highlightthickness=0, cursor="hand2"
@@ -1612,57 +2107,52 @@ class DynamicIslandPill:
         )
         self.apps_gmail_state_lbl = tk.Label(
             g_hdr,
-            text="Off",
+            text="Setup",
             bg=_PALETTE["well"],
             fg=_PALETTE["muted"],
-            font=(_MONO_FONT, 8, "bold"),
-            padx=6,
+            font=(_MONO_FONT, 7, "bold"),
+            padx=5,
             pady=1,
         )
-        self.apps_gmail_state_lbl.pack(side="right", padx=(4, 4))
-        tk.Label(
-            gmail_card,
-            text="Read unread mail, search threads & compose replies via IMAP/SMTP.",
-            bg=_PALETTE["panel_mid"],
-            fg=_PALETTE["muted"],
-            font=(_UI_FONT, 8),
-            anchor="w",
-        ).pack(fill="x", pady=(0, 6))
+        self.apps_gmail_state_lbl.pack(side="right", padx=(4, 2))
 
+        self._gmail_cfg_frame = tk.Frame(gmail_card, bg=_PALETTE["panel_mid"])
         tk.Label(
-            gmail_card, text="Gmail Address", bg=_PALETTE["panel_mid"], fg=_PALETTE["steel"], font=(_UI_FONT, 8, "bold"), anchor="w"
-        ).pack(fill="x")
+            self._gmail_cfg_frame, text="Gmail Address", bg=_PALETTE["panel_mid"], fg=_PALETTE["steel"], font=(_UI_FONT, 8), anchor="w"
+        ).pack(fill="x", pady=(4, 0))
         self.apps_gmail_addr_entry = tk.Entry(
-            gmail_card, bg=_PALETTE["well"], fg=_PALETTE["text"], insertbackground=_PALETTE["accent"],
-            relief="flat", highlightthickness=1, highlightbackground="#485364", font=(_UI_FONT, 9),
+            self._gmail_cfg_frame, bg=_PALETTE["well"], fg=_PALETTE["text"], insertbackground=_PALETTE["accent"],
+            relief="flat", highlightthickness=1, highlightbackground=_PALETTE["border"], font=(_UI_FONT, 8),
         )
         self.apps_gmail_addr_entry.insert(0, "you@gmail.com")
         self.apps_gmail_addr_entry.bind("<FocusIn>", lambda _e: self._clear_hint_entry(self.apps_gmail_addr_entry, "you@gmail.com"))
-        self.apps_gmail_addr_entry.pack(fill="x", pady=(2, 6), ipady=3)
+        self.apps_gmail_addr_entry.pack(fill="x", pady=(2, 4), ipady=2)
 
         tk.Label(
-            gmail_card, text="Google App Password", bg=_PALETTE["panel_mid"], fg=_PALETTE["steel"], font=(_UI_FONT, 8, "bold"), anchor="w"
+            self._gmail_cfg_frame, text="Google App Password", bg=_PALETTE["panel_mid"], fg=_PALETTE["steel"], font=(_UI_FONT, 8), anchor="w"
         ).pack(fill="x")
         self.apps_gmail_pass_entry = tk.Entry(
-            gmail_card, bg=_PALETTE["well"], fg=_PALETTE["text"], insertbackground=_PALETTE["accent"],
-            relief="flat", highlightthickness=1, highlightbackground="#485364", show="*", font=(_UI_FONT, 9),
+            self._gmail_cfg_frame, bg=_PALETTE["well"], fg=_PALETTE["text"], insertbackground=_PALETTE["accent"],
+            relief="flat", highlightthickness=1, highlightbackground=_PALETTE["border"], show="*", font=(_UI_FONT, 8),
         )
-        self.apps_gmail_pass_entry.pack(fill="x", pady=(2, 4), ipady=3)
+        self.apps_gmail_pass_entry.pack(fill="x", pady=(2, 2), ipady=2)
 
-        # --- Card 2: Google Calendar Connector ---
+        # --- Row 2: Google Calendar + Right Switch ---
         cal_card = tk.Frame(
             self._apps_grid,
             bg=_PALETTE["panel_mid"],
-            highlightbackground="#556173",
+            highlightbackground=_PALETTE["border"],
             highlightthickness=1,
-            padx=12,
-            pady=10,
+            padx=8,
+            pady=6,
         )
-        cal_card.grid(row=0, column=1, sticky="nsew", padx=(6, 0), pady=(0, 8))
         c_hdr = tk.Frame(cal_card, bg=_PALETTE["panel_mid"])
-        c_hdr.pack(fill="x", pady=(0, 4))
+        c_hdr.pack(fill="x")
         tk.Label(
-            c_hdr, text="📅  Google Calendar", bg=_PALETTE["panel_mid"], fg="#E8EDF4", font=(_UI_FONT, 10, "bold")
+            c_hdr, text="📅", bg=_PALETTE["panel_mid"], fg=_PALETTE["accent"], font=(_UI_FONT, 9)
+        ).pack(side="left", padx=(0, 5))
+        tk.Label(
+            c_hdr, text="Google Calendar", bg=_PALETTE["panel_mid"], fg="#EAF1F9", font=(_UI_FONT, 9, "bold")
         ).pack(side="left")
         self._apps_cal_sw = tk.Canvas(
             c_hdr, width=44, height=24, bg=_PALETTE["panel_mid"], highlightthickness=0, cursor="hand2"
@@ -1677,63 +2167,68 @@ class DynamicIslandPill:
             text="Local",
             bg=_PALETTE["well"],
             fg=_PALETTE["muted"],
-            font=(_MONO_FONT, 8, "bold"),
-            padx=6,
+            font=(_MONO_FONT, 7, "bold"),
+            padx=5,
             pady=1,
         )
-        self.apps_cal_state_lbl.pack(side="right", padx=(4, 4))
-        tk.Label(
-            cal_card,
-            text="Sync daily briefings & agenda from private iCal (.ics) feed or local events.",
-            bg=_PALETTE["panel_mid"],
-            fg=_PALETTE["muted"],
-            font=(_UI_FONT, 8),
-            anchor="w",
-        ).pack(fill="x", pady=(0, 6))
+        self.apps_cal_state_lbl.pack(side="right", padx=(4, 2))
 
+        self._cal_cfg_frame = tk.Frame(cal_card, bg=_PALETTE["panel_mid"])
         tk.Label(
-            cal_card, text="Private iCal URL (.ics)", bg=_PALETTE["panel_mid"], fg=_PALETTE["steel"], font=(_UI_FONT, 8, "bold"), anchor="w"
-        ).pack(fill="x")
+            self._cal_cfg_frame, text="Private iCal URL (.ics)", bg=_PALETTE["panel_mid"], fg=_PALETTE["steel"], font=(_UI_FONT, 8), anchor="w"
+        ).pack(fill="x", pady=(4, 0))
         self.apps_cal_url_entry = tk.Entry(
-            cal_card, bg=_PALETTE["well"], fg=_PALETTE["text"], insertbackground=_PALETTE["accent"],
-            relief="flat", highlightthickness=1, highlightbackground="#485364", font=(_UI_FONT, 9),
+            self._cal_cfg_frame, bg=_PALETTE["well"], fg=_PALETTE["text"], insertbackground=_PALETTE["accent"],
+            relief="flat", highlightthickness=1, highlightbackground=_PALETTE["border"], font=(_UI_FONT, 8),
         )
         self.apps_cal_url_entry.insert(0, "Private iCal URL (.ics)")
         self.apps_cal_url_entry.bind("<FocusIn>", lambda _e: self._clear_hint_entry(self.apps_cal_url_entry, "Private iCal URL (.ics)"))
-        self.apps_cal_url_entry.pack(fill="x", pady=(2, 8), ipady=3)
+        self.apps_cal_url_entry.pack(fill="x", pady=(2, 2), ipady=2)
 
-        cal_actions = tk.Frame(cal_card, bg=_PALETTE["panel_mid"])
-        cal_actions.pack(fill="x", pady=(4, 0))
-        self._mk_btn(
-            cal_actions,
-            "Save & Connect Apps",
-            self._save_apps_config,
-            bg=_PALETTE["cta_bg"],
-            fg="#F2F8FF",
-            hover_bg=_PALETTE["cta_hover"],
-            padx=10,
-            pady=3,
-            border_color=_PALETTE["arc_border"],
-        ).pack(side="right")
-        self.apps_feedback_lbl = tk.Label(
-            cal_actions, text="", bg=_PALETTE["panel_mid"], fg=_PALETTE["accent"], font=(_UI_FONT, 8)
+        # Collapsible Configuration Rows (matches Screenshot 3 Configuration / Configuration fields accordions)
+        self._apps_cfg_gmail_btn = self._mk_btn(
+            gmail_card,
+            "Configuration                                        ⌄",
+            lambda: self._toggle_apps_cfg("gmail"),
+            bg=_PALETTE["well"],
+            fg=_PALETTE["muted"],
+            hover_bg=_PALETTE["card"],
+            hover_fg="#FFFFFF",
+            padx=6,
+            pady=2,
+            border_color=_PALETTE["border"],
         )
-        self.apps_feedback_lbl.pack(side="left")
+        self._apps_cfg_gmail_btn.configure(font=(_UI_FONT, 8), anchor="w")
+        self._apps_cfg_gmail_btn.pack(fill="x", pady=(5, 0))
 
-        # --- Card 3: Browser & Chrome MCP Plugin ---
+        self._apps_cfg_cal_btn = self._mk_btn(
+            cal_card,
+            "Configuration fields                              ⌄",
+            lambda: self._toggle_apps_cfg("calendar"),
+            bg=_PALETTE["well"],
+            fg=_PALETTE["muted"],
+            hover_bg=_PALETTE["card"],
+            hover_fg="#FFFFFF",
+            padx=6,
+            pady=2,
+            border_color=_PALETTE["border"],
+        )
+        self._apps_cfg_cal_btn.configure(font=(_UI_FONT, 8), anchor="w")
+        self._apps_cfg_cal_btn.pack(fill="x", pady=(5, 0))
+
+        # --- Row 3: Browser & Research MCP ---
         browser_card = tk.Frame(
             self._apps_grid,
             bg=_PALETTE["panel_mid"],
-            highlightbackground="#556173",
+            highlightbackground=_PALETTE["border"],
             highlightthickness=1,
-            padx=12,
-            pady=10,
+            padx=8,
+            pady=5,
         )
-        browser_card.grid(row=1, column=0, sticky="nsew", padx=(0, 6))
         bh = tk.Frame(browser_card, bg=_PALETTE["panel_mid"])
-        bh.pack(fill="x", pady=(0, 4))
+        bh.pack(fill="x")
         tk.Label(
-            bh, text="🌐  Browser & Research MCP", bg=_PALETTE["panel_mid"], fg="#E8EDF4", font=(_UI_FONT, 10, "bold")
+            bh, text="🌐  Browser & Web MCP", bg=_PALETTE["panel_mid"], fg="#EAF1F9", font=(_UI_FONT, 8, "bold")
         ).pack(side="left")
         self._apps_browser_sw = tk.Canvas(
             bh, width=44, height=24, bg=_PALETTE["panel_mid"], highlightthickness=0, cursor="hand2"
@@ -1743,43 +2238,22 @@ class DynamicIslandPill:
             self._apps_browser_sw, active=True, bg_hex=_PALETTE["panel_mid"]
         )
         tk.Label(
-            bh, text="17 tools", bg=_PALETTE["well"], fg=_PALETTE["accent"], font=(_MONO_FONT, 8, "bold"), padx=6, pady=1
-        ).pack(side="right", padx=(4, 4))
-        tk.Label(
-            browser_card,
-            text="Instant Chrome/web opens, compact [e1] DOM automation & safe DuckDuckGo research.",
-            bg=_PALETTE["panel_mid"],
-            fg=_PALETTE["muted"],
-            font=(_UI_FONT, 8),
-            anchor="w",
-            wraplength=410,
-            justify="left",
-        ).pack(fill="x", pady=(0, 6))
-        self._mk_btn(
-            browser_card,
-            "Open Chrome",
-            lambda: (self._close_apps_popover(), self._run_quick("open chrome")),
-            bg=_PALETTE["well"],
-            fg=_PALETTE["text"],
-            padx=8,
-            pady=2,
-            border_color="#485364",
-        ).pack(anchor="w")
+            bh, text="17 tools", bg=_PALETTE["well"], fg=_PALETTE["accent"], font=(_MONO_FONT, 7, "bold"), padx=5, pady=1
+        ).pack(side="right")
 
-        # --- Card 4: Desktop Vision & Cloud Plugins ---
+        # --- Row 4: Desktop Vision & Cloud Plugins ---
         sys_card = tk.Frame(
             self._apps_grid,
             bg=_PALETTE["panel_mid"],
-            highlightbackground="#556173",
+            highlightbackground=_PALETTE["border"],
             highlightthickness=1,
-            padx=12,
-            pady=10,
+            padx=8,
+            pady=5,
         )
-        sys_card.grid(row=1, column=1, sticky="nsew", padx=(6, 0))
         sh = tk.Frame(sys_card, bg=_PALETTE["panel_mid"])
-        sh.pack(fill="x", pady=(0, 4))
+        sh.pack(fill="x")
         tk.Label(
-            sh, text="🖥  Desktop Vision & Cloud APIs", bg=_PALETTE["panel_mid"], fg="#E8EDF4", font=(_UI_FONT, 10, "bold")
+            sh, text="🖥  Desktop & Cloud MCP", bg=_PALETTE["panel_mid"], fg="#EAF1F9", font=(_UI_FONT, 8, "bold")
         ).pack(side="left")
         self._apps_sys_sw = tk.Canvas(
             sh, width=44, height=24, bg=_PALETTE["panel_mid"], highlightthickness=0, cursor="hand2"
@@ -1788,49 +2262,59 @@ class DynamicIslandPill:
         self._img_refs["app_sys_sw"] = self._draw_switch(
             self._apps_sys_sw, active=True, bg_hex=_PALETTE["panel_mid"]
         )
-        tk.Label(
-            sh, text="37 MCP tools", bg=_PALETTE["well"], fg=_PALETTE["accent"], font=(_MONO_FONT, 8, "bold"), padx=6, pady=1
-        ).pack(side="right", padx=(4, 4))
         self._apps_cloud_lbl = tk.Label(
             sys_card,
-            text="Desktop/Filesystem/Git MCP ready · Configure Cloud providers in Web UI.",
+            text="Desktop/FS/Git MCP ready",
             bg=_PALETTE["panel_mid"],
             fg=_PALETTE["muted"],
-            font=(_UI_FONT, 8),
+            font=(_UI_FONT, 7),
             anchor="w",
-            wraplength=410,
-            justify="left",
         )
-        self._apps_cloud_lbl.pack(fill="x", pady=(0, 6))
-        cbtns = tk.Frame(sys_card, bg=_PALETTE["panel_mid"])
-        cbtns.pack(fill="x")
-        self._mk_btn(
-            cbtns,
-            "Inspect Tools",
-            lambda: (self._close_apps_popover(), self._open_tools_popover(pinned=True)),
-            bg=_PALETTE["well"],
-            fg=_PALETTE["text"],
-            padx=8,
-            pady=2,
-            border_color="#485364",
-        ).pack(side="left", padx=(0, 6))
-        self._mk_btn(
-            cbtns,
-            "Web Settings",
-            lambda: webbrowser.open(self.bridge.base_url),
-            bg=_PALETTE["well"],
-            fg=_PALETTE["arc_text"],
-            padx=8,
-            pady=2,
-            border_color="#485364",
-        ).pack(side="left")
+        self._apps_cloud_lbl.pack(fill="x", pady=(2, 0))
 
         self._apps_cards = [
-            (gmail_card, "gmail email inbox workspace app", "workspace", 0, 0, 6),
-            (cal_card, "google calendar schedule ics workspace app", "workspace", 0, 1, 6),
-            (browser_card, "browser chrome research web mcp plugin", "mcp", 1, 0, 6),
-            (sys_card, "desktop vision files git cloud gemini freellmapi mcp", "mcp", 1, 1, 6),
+            (gmail_card, "gmail email inbox workspace app", "workspace", 0, 0, 0),
+            (cal_card, "google calendar schedule ics workspace app", "workspace", 1, 0, 0),
+            (browser_card, "browser chrome research web mcp plugin", "mcp", 2, 0, 0),
+            (sys_card, "desktop vision files git cloud gemini freellmapi mcp", "mcp", 3, 0, 0),
         ]
+
+        # Footer Save & Connect Row (Screenshot 3 bottom-right CTA)
+        cal_actions = tk.Frame(self.apps_popover, bg="#121C2A")
+        cal_actions.pack(fill="x", pady=(6, 0))
+        self.apps_feedback_lbl = tk.Label(
+            cal_actions, text="", bg="#121C2A", fg=_PALETTE["accent"], font=(_UI_FONT, 8)
+        )
+        self.apps_feedback_lbl.pack(side="left")
+        self._mk_btn(
+            cal_actions,
+            "Save & Connect",
+            self._save_apps_config,
+            bg=_PALETTE["card_hi"],
+            fg="#F2F8FF",
+            hover_bg=_PALETTE["cta_bg"],
+            padx=10,
+            pady=3,
+            border_color=_PALETTE["arc_border"],
+        ).pack(side="right")
+
+    def _toggle_apps_cfg(self, which: str) -> None:
+        if which == "gmail":
+            self._apps_cfg_gmail_open = not getattr(self, "_apps_cfg_gmail_open", False)
+            if self._apps_cfg_gmail_open:
+                self._gmail_cfg_frame.pack(fill="x", pady=(2, 0))
+                self._apps_cfg_gmail_btn.configure(text="Configuration                                        ⌃")
+            else:
+                self._gmail_cfg_frame.pack_forget()
+                self._apps_cfg_gmail_btn.configure(text="Configuration                                        ⌄")
+        else:
+            self._apps_cfg_cal_open = not getattr(self, "_apps_cfg_cal_open", False)
+            if self._apps_cfg_cal_open:
+                self._cal_cfg_frame.pack(fill="x", pady=(2, 0))
+                self._apps_cfg_cal_btn.configure(text="Configuration fields                              ⌃")
+            else:
+                self._cal_cfg_frame.pack_forget()
+                self._apps_cfg_cal_btn.configure(text="Configuration fields                              ⌄")
 
     def _set_apps_cat_filter(self, cat: str) -> None:
         self._apps_cat_filter = cat
@@ -1839,7 +2323,7 @@ class DynamicIslandPill:
             btn.configure(
                 bg=_PALETTE["pill_active_bg"] if act else _PALETTE["well"],
                 fg="#FFFFFF" if act else _PALETTE["steel"],
-                highlightbackground=_PALETTE["arc_border"] if act else "#485364",
+                highlightbackground=_PALETTE["arc_border"] if act else _PALETTE["border"],
             )
         self._filter_apps_cards()
 
@@ -1850,7 +2334,7 @@ class DynamicIslandPill:
         apps = self._apps_status or {}
         g_conn = bool((apps.get("gmail") or {}).get("connected"))
         c_conn = bool((apps.get("calendar") or {}).get("connected"))
-        for idx, (card, keywords, kind, row_i, col_i, pad) in enumerate(getattr(self, "_apps_cards", ())):
+        for idx, (card, keywords, kind, row_i, _col_i, _pad) in enumerate(getattr(self, "_apps_cards", ())):
             match_q = (not q) or (q in keywords)
             if cat == "mcp":
                 match_cat = kind == "mcp"
@@ -1864,9 +2348,7 @@ class DynamicIslandPill:
             else:
                 match_cat = True
             if match_q and match_cat:
-                padx = (0, pad) if col_i == 0 else (pad, 0)
-                pady = (0, 8) if row_i == 0 else (0, 0)
-                card.grid(row=row_i, column=col_i, sticky="nsew", padx=padx, pady=pady)
+                card.grid(row=row_i, column=0, sticky="ew", pady=(0, 5))
             else:
                 card.grid_remove()
 
@@ -1885,13 +2367,23 @@ class DynamicIslandPill:
             self.expand()
         self._close_model_popover()
         self._close_tools_popover()
+        self._close_persona_popover()
+        self._close_agent_popover()
         if getattr(self, "_apps_popover_visible", False):
             self._close_apps_popover()
             return
         self._sync_apps_popover()
         self._filter_apps_cards()
         self._apps_popover_visible = True
-        self.apps_popover.place(in_=self.panel_host, x=0, y=0, relwidth=1.0, relheight=1.0)
+        try:
+            self.frame.update_idletasks()
+            fw = max(480, self.frame.winfo_width() or 960)
+            pop_w = 300
+            px = max(12, fw - pop_w - 14)
+            py = max(48, self.header.winfo_height() + 6)
+            self.apps_popover.place(in_=self.frame, x=px, y=py, width=pop_w)
+        except Exception:
+            self.apps_popover.place(in_=self.frame, x=646, y=54, width=300)
         self.apps_popover.lift()
 
     def _sync_apps_popover(self) -> None:
@@ -2082,16 +2574,16 @@ class DynamicIslandPill:
         """Create a sticky hover/click in-island Tools catalog popover (replaces buggy tk_popup)."""
         self.tools_popover = tk.Frame(
             self.frame,
-            bg="#1F242E",
+            bg="#121C2A",
             highlightbackground=_PALETTE["arc_border"],
             highlightthickness=1,
         )
-        hdr = tk.Frame(self.tools_popover, bg="#252B37")
+        hdr = tk.Frame(self.tools_popover, bg="#172334")
         hdr.pack(fill="x")
         self._tools_hdr_lbl = tk.Label(
             hdr,
             text="TOOLS & MCP CATALOG",
-            bg="#252B37",
+            bg="#172334",
             fg=_PALETTE["arc_text"],
             font=(_TECH_FONT, 8, "bold"),
             padx=8,
@@ -2101,7 +2593,7 @@ class DynamicIslandPill:
         self._tools_pin_lbl = tk.Label(
             hdr,
             text="Hover · Click to pin",
-            bg="#252B37",
+            bg="#172334",
             fg=_PALETTE["muted"],
             font=(_UI_FONT, 8),
             padx=4,
@@ -2111,31 +2603,32 @@ class DynamicIslandPill:
             hdr,
             "×",
             self._close_tools_popover,
-            bg="#252B37",
+            bg="#172334",
             fg=_PALETTE["steel"],
             padx=6,
             pady=1,
-            border_color="#252B37",
+            border_color="#172334",
         ).pack(side="right", padx=2)
 
-        quick_bar = tk.Frame(self.tools_popover, bg="#1F242E")
+        quick_bar = tk.Frame(self.tools_popover, bg="#121C2A")
         quick_bar.pack(fill="x", padx=6, pady=(5, 4))
         for col in range(3):
             quick_bar.columnconfigure(col, weight=1)
         for idx, (lbl, cmd_prompt) in enumerate((
-            ("✦ Briefing", "morning briefing"),
-            ("📅 Agenda", "what is on my calendar today?"),
-            ("🖥 Screen", "what is on my screen?"),
-            ("🪟 Windows", "list windows"),
-            ("✓ Todos", "list my todos"),
-            ("🧹 Free VRAM", "__VRAM__"),
+            ("DeepSearch", "research the web for: "),
+            ("Think", "analyze step by step: "),
+            ("Screen", "what is on my screen?"),
+            ("Git", "check git status and recent changes"),
+            ("Attach", "__ATTACH__"),
+            ("Free VRAM", "__VRAM__"),
         )):
             r, c = divmod(idx, 3)
-            action = (
-                (lambda: (self._close_tools_popover(), self._unload_vram()))
-                if cmd_prompt == "__VRAM__"
-                else (lambda p=cmd_prompt: (self._close_tools_popover(), self._run_quick(p)))
-            )
+            if cmd_prompt == "__VRAM__":
+                action = lambda: (self._close_tools_popover(), self._unload_vram())
+            elif cmd_prompt == "__ATTACH__":
+                action = lambda: (self._close_tools_popover(), self._attach_file_path())
+            else:
+                action = lambda p=cmd_prompt: (self._close_tools_popover(), self._run_quick(p))
             self._mk_btn(
                 quick_bar,
                 lbl,
@@ -2144,7 +2637,7 @@ class DynamicIslandPill:
                 fg=_PALETTE["steel"],
                 padx=5,
                 pady=3,
-                border_color="#485364",
+                border_color=_PALETTE["border"],
             ).grid(row=r, column=c, sticky="ew", padx=2, pady=2)
 
         list_wrap = tk.Frame(self.tools_popover, bg="#1B2029")
@@ -2441,6 +2934,8 @@ class DynamicIslandPill:
         self._cancel_tools_hover_close()
         self._close_model_popover()
         self._close_apps_popover()
+        self._close_persona_popover()
+        self._close_agent_popover()
         if not self.expanded:
             self.expand()
         if pinned:
@@ -2497,8 +2992,8 @@ class DynamicIslandPill:
     def _build_chat_panel(self) -> None:
         self.chat_panel = tk.Frame(self.panel_host, bg=_PALETTE["bg"])
 
-        # Slim Right Utility Rail (compact Todos + Apps launcher + Agent Pipeline status)
-        right_col = tk.Frame(self.chat_panel, bg=_PALETTE["bg"], width=224)
+        # Slim Right Utility Rail (Executive Summary + Todos + Agent Pipeline)
+        right_col = tk.Frame(self.chat_panel, bg=_PALETTE["bg"], width=244)
         right_col.pack(side="right", fill="y", padx=(8, 0))
         right_col.pack_propagate(False)
 
@@ -2506,23 +3001,23 @@ class DynamicIslandPill:
         left_col = tk.Frame(
             self.chat_panel,
             bg=_PALETTE["well"],
-            highlightbackground="#4E5869",
+            highlightbackground=_PALETTE["border"],
             highlightthickness=1,
         )
         left_col.pack(side="left", fill="both", expand=True)
 
-        # Compact Collapsible Reasoning Steps Header
+        # Top Strip: ▾ Reasoning Trace | 0 tools called
         rs_wrap = tk.Frame(
             left_col,
             bg=_PALETTE["card"],
-            highlightbackground="#5A6678",
+            highlightbackground=_PALETTE["border"],
             highlightthickness=1,
         )
-        rs_wrap.pack(side="top", fill="x", padx=10, pady=(8, 4))
+        rs_wrap.pack(side="top", fill="x", padx=8, pady=(6, 4))
 
         self.reasoning_btn = tk.Button(
             rs_wrap,
-            text="▾  Reasoning steps",
+            text="▾  Reasoning Trace",
             command=self._toggle_reasoning,
             bg=_PALETTE["card"],
             fg=_PALETTE["text"],
@@ -2530,24 +3025,28 @@ class DynamicIslandPill:
             activeforeground="#FFFFFF",
             relief="flat",
             bd=0,
-            font=(_UI_FONT, 9, "bold"),
-            padx=10,
-            pady=4,
+            font=(_UI_FONT, 8, "bold"),
+            padx=8,
+            pady=3,
             cursor="hand2",
             anchor="w",
         )
-        self.reasoning_btn.pack(side="left", fill="x", expand=True)
+        self.reasoning_btn.pack(side="left")
+
+        tk.Label(rs_wrap, text="|", bg=_PALETTE["card"], fg=_PALETTE["border"], font=(_UI_FONT, 9)).pack(
+            side="left", padx=2
+        )
 
         self.tools_called_badge = tk.Label(
             rs_wrap,
             text="0 tools called",
-            bg=_PALETTE["well"],
-            fg=_PALETTE["arc_text"],
-            font=(_MONO_FONT, 8, "bold"),
-            padx=8,
+            bg=_PALETTE["card"],
+            fg=_PALETTE["muted"],
+            font=(_UI_FONT, 8),
+            padx=6,
             pady=2,
         )
-        self.tools_called_badge.pack(side="right", padx=(4, 6), pady=3)
+        self.tools_called_badge.pack(side="left")
 
         self.reasoning_detail_lbl = tk.Label(
             left_col,
@@ -2557,22 +3056,22 @@ class DynamicIslandPill:
             font=(_MONO_FONT, 8),
             anchor="w",
             justify="left",
-            wraplength=640,
+            wraplength=630,
             padx=12,
-            pady=5,
+            pady=4,
         )
 
-        # Spacious Multi-line Word-Wrapping Composer (bottom-anchored so it never clips)
+        # Spacious Multi-line Word-Wrapping Composer (Screenshot 1 & 3 exact layout)
         self.input_row = tk.Frame(
             left_col,
             bg=_PALETTE["panel_mid"],
-            highlightbackground="#7E8DA2",
+            highlightbackground=_PALETTE["border_hi"],
             highlightthickness=1,
         )
-        self.input_row.pack(side="bottom", fill="x", padx=10, pady=(4, 8))
+        self.input_row.pack(side="bottom", fill="x", padx=8, pady=(4, 8))
 
         entry_top = tk.Frame(self.input_row, bg=_PALETTE["panel_mid"])
-        entry_top.pack(fill="x", padx=10, pady=(8, 4))
+        entry_top.pack(fill="x", padx=10, pady=(7, 3))
 
         self.entry = _ComposerText(
             entry_top,
@@ -2597,71 +3096,41 @@ class DynamicIslandPill:
         self.entry.bind("<Shift-Return>", lambda _e: None)
         self.input_row.bind("<Button-1>", self._focus_entry)
 
-        # Clean Antigravity/ChatGPT-style Composer Toolbar:
-        # Left: Model selector (up/down) + Agent role picker + Tools + Attach
-        # Right: Mic + Pause + Send
+        # Bottom Composer Toolbar:
+        # Left: ■ Stop Aura + 🎙 Mic
+        # Right: Model ▴ + @auto ▴ + + Tools ▴ + Enter to send ↵ + Send
         chips_row = tk.Frame(self.input_row, bg=_PALETTE["panel_mid"])
         chips_row.pack(fill="x", padx=8, pady=(2, 7))
 
-        self.model_btn = self._mk_btn(
+        self.composer_stop_btn = self._mk_btn(
             chips_row,
-            f"⌃ {self.active_model_name} ▾",
-            self._open_model_menu,
-            bg=_PALETTE["well"],
-            fg=_PALETTE["arc_text"],
-            hover_bg=_PALETTE["pill_active_bg"],
-            hover_fg="#FFFFFF",
-            padx=7,
-            pady=2,
-            border_color=_PALETTE["arc_border"],
-        )
-        self.model_btn.pack(side="left", padx=(0, 4))
-
-        self.agent_btn = tk.Button(
-            chips_row,
-            text="✦ Auto ▾",
-            command=self._open_agent_menu,
-            bg=_PALETTE["well"],
-            fg=_PALETTE["accent"],
-            activebackground=_PALETTE["pill_active_bg"],
-            activeforeground="#FFFFFF",
-            relief="flat",
-            bd=0,
-            highlightthickness=1,
-            highlightbackground="#5A667A",
-            font=(_UI_FONT, 8, "bold"),
-            padx=7,
-            pady=2,
-            cursor="hand2",
-        )
-        self.agent_btn.pack(side="left", padx=(0, 4))
-
-        self.tools_btn = self._mk_btn(
-            chips_row,
-            "▴ Tools",
-            self._toggle_tools_popover,
+            "■ Stop Aura",
+            self.stop_active,
             bg=_PALETTE["card"],
             fg=_PALETTE["steel"],
-            padx=6,
+            hover_bg=_PALETTE["danger_bg"],
+            hover_fg=_PALETTE["danger_fg"],
+            padx=8,
             pady=2,
-            border_color="#5A667A",
+            border_color=_PALETTE["border"],
         )
-        self.tools_btn.bind("<Enter>", self._on_tools_enter, add="+")
-        self.tools_btn.bind("<Leave>", self._on_tools_leave, add="+")
-        self.tools_btn.pack(side="left", padx=(0, 3))
+        self.composer_stop_btn.configure(font=(_UI_FONT, 8, "bold"))
+        self.composer_stop_btn.pack(side="left", padx=(0, 5))
 
-        self._mk_btn(
+        self.mic_btn = self._mk_btn(
             chips_row,
-            "+ Attach",
-            self._attach_file_path,
+            "🎙 Mic",
+            self.toggle_mic,
             bg=_PALETTE["card"],
-            fg="#DCE4EE",
-            hover_bg=_PALETTE["card_hi"],
-            hover_fg=_PALETTE["arc_text"],
-            padx=6,
+            fg=_PALETTE["steel"],
+            hover_bg=_PALETTE["titanium"],
+            hover_fg=_PALETTE["accent"],
+            padx=8,
             pady=2,
-            border_color="#5A667A",
-        ).pack(side="left", padx=(0, 3))
+            border_color=_PALETTE["border"],
+        )
+        self.mic_btn.configure(font=(_UI_FONT, 8, "bold"))
+        self.mic_btn.pack(side="left", padx=(0, 4))
 
         self.send_btn = self._mk_btn(
             chips_row,
@@ -2671,39 +3140,74 @@ class DynamicIslandPill:
             fg="#F2F8FF",
             hover_bg=_PALETTE["cta_hover"],
             hover_fg="#FFFFFF",
-            padx=10,
+            padx=9,
             pady=2,
             border_color=_PALETTE["arc_border"],
         )
-        self.send_btn.pack(side="right")
+        self.send_btn.configure(font=(_UI_FONT, 8, "bold"))
+        self.send_btn.pack(side="right", padx=(4, 0))
 
-        self.composer_stop_btn = self._mk_btn(
+        self._enter_hint_lbl = tk.Label(
             chips_row,
-            "⏸ Pause",
-            self.stop_active,
-            bg=_PALETTE["gunmetal"],
+            text="Enter to send ↵",
+            bg=_PALETTE["panel_mid"],
+            fg=_PALETTE["muted"],
+            font=(_UI_FONT, 8),
+            cursor="hand2",
+        )
+        self._enter_hint_lbl.bind("<Button-1>", lambda _e: self._on_send_or_stop())
+        self._enter_hint_lbl.pack(side="right", padx=(4, 2))
+
+        self.tools_btn = self._mk_btn(
+            chips_row,
+            "+ Tools ▴",
+            self._toggle_tools_popover,
+            bg=_PALETTE["well"],
             fg=_PALETTE["steel"],
-            hover_bg=_PALETTE["danger_bg"],
-            hover_fg=_PALETTE["danger_fg"],
+            hover_bg=_PALETTE["card_hi"],
+            hover_fg="#FFFFFF",
             padx=7,
             pady=2,
-            border_color="#5A667A",
+            border_color=_PALETTE["border"],
         )
-        self.composer_stop_btn.pack(side="right", padx=(0, 4))
+        self.tools_btn.configure(font=(_UI_FONT, 8, "bold"))
+        self.tools_btn.bind("<Enter>", self._on_tools_enter, add="+")
+        self.tools_btn.bind("<Leave>", self._on_tools_leave, add="+")
+        self.tools_btn.pack(side="right", padx=(0, 4))
 
-        self.mic_btn = self._mk_btn(
+        self.agent_btn = tk.Button(
             chips_row,
-            "🎙 Mic",
-            self.toggle_mic,
-            bg=_PALETTE["gunmetal"],
-            fg=_PALETTE["steel"],
-            hover_bg=_PALETTE["titanium"],
-            hover_fg=_PALETTE["accent"],
-            padx=7,
+            text="@auto ▴",
+            command=self._open_agent_menu,
+            bg=_PALETTE["well"],
+            fg=_PALETTE["accent"],
+            activebackground=_PALETTE["pill_active_bg"],
+            activeforeground="#FFFFFF",
+            relief="flat",
+            bd=0,
+            highlightthickness=1,
+            highlightbackground=_PALETTE["border"],
+            font=(_UI_FONT, 8, "bold"),
+            padx=8,
             pady=2,
-            border_color="#5A667A",
+            cursor="hand2",
         )
-        self.mic_btn.pack(side="right", padx=(0, 4))
+        self.agent_btn.pack(side="right", padx=(0, 4))
+
+        self.model_btn = self._mk_btn(
+            chips_row,
+            f"{self.active_model_name} ▴",
+            self._open_model_menu,
+            bg=_PALETTE["well"],
+            fg=_PALETTE["arc_text"],
+            hover_bg=_PALETTE["pill_active_bg"],
+            hover_fg="#FFFFFF",
+            padx=8,
+            pady=2,
+            border_color=_PALETTE["border"],
+        )
+        self.model_btn.configure(font=(_UI_FONT, 8, "bold"))
+        self.model_btn.pack(side="right", padx=(0, 4))
 
         # Spacious Chat Response Well
         self.output = tk.Text(
@@ -2727,139 +3231,230 @@ class DynamicIslandPill:
         self.output.tag_configure("you_tag", foreground=_PALETTE["accent"], font=(_MONO_FONT, 9, "bold"))
         self.output.tag_configure("you_body", foreground="#FFFFFF", font=(_UI_FONT, 10, "bold"))
         self.output.tag_configure("jarvis_tag", foreground=_PALETTE["accent"], font=(_MONO_FONT, 9, "bold"))
-        self.output.tag_configure("ultron_tag", foreground="#93C5FD", font=(_MONO_FONT, 9, "bold"))
+        self.output.tag_configure("ultron_tag", foreground="#FBBF24", font=(_MONO_FONT, 9, "bold"))
         self.output.tag_configure("megatron_tag", foreground="#F87171", font=(_MONO_FONT, 9, "bold"))
-        self.output.tag_configure("ans_body", foreground="#E8EDF4", font=(_UI_FONT, 10))
+        self.output.tag_configure("ans_body", foreground="#EAF1F9", font=(_UI_FONT, 10))
         self.output.tag_configure("code_blk", background=_PALETTE["code_bg"], foreground="#EAF2FA", font=(_MONO_FONT, 9))
         self.output.tag_configure("meta_note", foreground=_PALETTE["muted"], font=(_MONO_FONT, 8))
         self.output.tag_configure("steer_tag", foreground="#FBBF24", font=(_UI_FONT, 9, "bold"))
-        self.output.tag_configure("err_body", foreground=_PALETTE["danger_fg"], font=(_UI_FONT, 10))
+        self.output.tag_configure("err_body", foreground="#FDA4AF", font=(_UI_FONT, 10))
         self.output.insert(
             "end",
-            "◈ AURA Ready — pick model bottom-left, @agent beside it, or type freely.\n",
+            "◈ AURA V4 Ready — ask anything, @mention an agent, or switch themes top-left.\n",
             "welcome",
         )
         self.output.configure(state="disabled")
 
-        # --- Slim Right Rail: Todos + Apps + Live Agent Progress ---
+        # --- Slim Right Rail Cards: 1) Executive Summary, 2) Todos, 3) Agent Pipeline ---
+        # Card 1: EXECUTIVE SUMMARY — LIVE BRIEFING
+        summary_card = tk.Frame(
+            right_col,
+            bg=_PALETTE["card"],
+            highlightbackground=_PALETTE["border"],
+            highlightthickness=1,
+            padx=9,
+            pady=8,
+        )
+        summary_card.pack(fill="x", pady=(0, 6))
+
+        tk.Label(
+            summary_card,
+            text="EXECUTIVE SUMMARY — LIVE BRIEFING",
+            bg=_PALETTE["card"],
+            fg=_PALETTE["muted"],
+            font=(_TECH_FONT, 7, "bold"),
+            anchor="w",
+        ).pack(fill="x", pady=(0, 4))
+
+        self.briefing_list_frame = tk.Frame(summary_card, bg=_PALETTE["card"])
+        self.briefing_list_frame.pack(fill="x", pady=(0, 6))
+        self._render_briefing([
+            "0 To-dos pending today",
+            "Next event: Local Agenda",
+            "Gmail: Open Apps to link",
+        ])
+
+        self.agenda_list_frame = tk.Frame(summary_card, bg=_PALETTE["card"])
+        self.agenda_cal_frame = tk.Frame(summary_card, bg=_PALETTE["card"])
+        self.gmail_list_frame = tk.Frame(summary_card, bg=_PALETTE["card"])
+
+        self._summary_cta_btn = self._mk_btn(
+            summary_card,
+            "Summarize my day",
+            lambda: self._run_quick("Summarize my day across unread emails, calendar events, and pending to-dos"),
+            bg=_PALETTE["cta_bg"],
+            fg="#FFFFFF",
+            hover_bg=_PALETTE["cta_hover"],
+            padx=8,
+            pady=4,
+            border_color=_PALETTE["arc_border"],
+        )
+        self._summary_cta_btn.pack(fill="x", pady=(0, 6))
+
+        sub_btns = tk.Frame(summary_card, bg=_PALETTE["card"])
+        sub_btns.pack(fill="x")
+        sub_btns.columnconfigure(0, weight=1)
+        sub_btns.columnconfigure(1, weight=1)
+        self._mk_btn(
+            sub_btns,
+            "Agenda (Cal)",
+            lambda: self._switch_right_subview("agenda"),
+            bg=_PALETTE["well"],
+            fg=_PALETTE["steel"],
+            hover_bg=_PALETTE["card_hi"],
+            hover_fg="#FFFFFF",
+            padx=6,
+            pady=2,
+            border_color=_PALETTE["border"],
+        ).grid(row=0, column=0, sticky="ew", padx=(0, 3))
+        self._mk_btn(
+            sub_btns,
+            "Gmail (Inbox)",
+            lambda: self._switch_right_subview("gmail"),
+            bg=_PALETTE["well"],
+            fg=_PALETTE["steel"],
+            hover_bg=_PALETTE["card_hi"],
+            hover_fg="#FFFFFF",
+            padx=6,
+            pady=2,
+            border_color=_PALETTE["border"],
+        ).grid(row=0, column=1, sticky="ew", padx=(3, 0))
+
+        # Card 2: Todos (0/0) + [+ Add]
         todos_card = tk.Frame(
             right_col,
             bg=_PALETTE["panel_mid"],
-            highlightbackground="#556173",
+            highlightbackground=_PALETTE["border"],
             highlightthickness=1,
+            padx=9,
+            pady=7,
         )
-        todos_card.pack(fill="both", expand=True)
+        todos_card.pack(fill="both", expand=True, pady=(0, 6))
 
         todo_hdr = tk.Frame(todos_card, bg=_PALETTE["panel_mid"])
-        todo_hdr.pack(fill="x", padx=10, pady=(8, 4))
-        tk.Label(todo_hdr, text="◆", bg=_PALETTE["panel_mid"], fg=_PALETTE["accent"], font=(_UI_FONT, 9)).pack(
-            side="left", padx=(0, 5)
-        )
+        todo_hdr.pack(fill="x", pady=(0, 4))
         tk.Label(
-            todo_hdr, text="TODOS", bg=_PALETTE["panel_mid"], fg="#E8EDF4", font=(_TECH_FONT, 9, "bold")
+            todo_hdr, text="Todos", bg=_PALETTE["panel_mid"], fg="#EAF1F9", font=(_UI_FONT, 9, "bold")
         ).pack(side="left")
         self.todo_count_lbl = tk.Label(
-            todo_hdr, text="0 of 0 done", bg=_PALETTE["panel_mid"], fg=_PALETTE["steel"], font=(_UI_FONT, 8, "bold")
+            todo_hdr, text="(0/0)", bg=_PALETTE["panel_mid"], fg=_PALETTE["muted"], font=(_UI_FONT, 8, "bold")
         )
-        self.todo_count_lbl.pack(side="right")
+        self.todo_count_lbl.pack(side="left", padx=(4, 0))
+        self._mk_btn(
+            todo_hdr,
+            "[+ Add]",
+            self._toggle_todo_add_row,
+            bg=_PALETTE["panel_mid"],
+            fg=_PALETTE["accent"],
+            hover_bg=_PALETTE["card_hi"],
+            hover_fg="#FFFFFF",
+            padx=4,
+            pady=0,
+        ).pack(side="right")
 
         self.todo_prog_canvas = tk.Canvas(
-            todos_card, height=5, bg=_PALETTE["well"], highlightthickness=0
+            todos_card, height=4, bg=_PALETTE["well"], highlightthickness=0
         )
-        self.todo_prog_canvas.pack(fill="x", padx=10, pady=(0, 6))
-        self._todo_prog_fill = self.todo_prog_canvas.create_rectangle(0, 0, 0, 5, fill=_PALETTE["accent"], outline="")
+        self.todo_prog_canvas.pack(fill="x", pady=(0, 5))
+        self._todo_prog_fill = self.todo_prog_canvas.create_rectangle(0, 0, 0, 4, fill=_PALETTE["accent"], outline="")
 
-        self.todo_list_frame = tk.Frame(todos_card, bg=_PALETTE["panel_mid"])
-        self.todo_list_frame.pack(fill="x", padx=8, pady=(0, 4))
-        self._todo_vars = []
-        self._render_todos(self._todo_items)
-
-        todo_add_row = tk.Frame(todos_card, bg=_PALETTE["panel_mid"])
-        todo_add_row.pack(fill="x", padx=10, pady=(2, 4))
+        self.todo_add_row = tk.Frame(todos_card, bg=_PALETTE["panel_mid"])
         self.todo_add_entry = tk.Entry(
-            todo_add_row,
+            self.todo_add_row,
             bg=_PALETTE["well"],
             fg=_PALETTE["text"],
             insertbackground=_PALETTE["accent"],
             relief="flat",
-            font=(_UI_FONT, 9),
+            highlightthickness=1,
+            highlightbackground=_PALETTE["border"],
+            font=(_UI_FONT, 8),
         )
         self.todo_add_entry.pack(side="left", fill="x", expand=True, ipady=2, padx=(0, 4))
         self.todo_add_entry.bind("<Return>", lambda _e: self._add_todo_item())
         self._mk_btn(
-            todo_add_row,
-            "+ Add",
+            self.todo_add_row,
+            "Add",
             self._add_todo_item,
             bg=_PALETTE["card_hi"],
             fg="#DCE4EE",
-            padx=7,
-            pady=1,
-            border_color="#67758A",
-        ).pack(side="right")
-
-        # Compact Apps Launcher inside Right Rail (Gmail / Calendar toggle card)
-        tk.Frame(todos_card, height=1, bg="#465163").pack(fill="x", padx=10, pady=(6, 6))
-        apps_rail_hdr = tk.Frame(todos_card, bg=_PALETTE["panel_mid"])
-        apps_rail_hdr.pack(fill="x", padx=10, pady=(0, 2))
-        tk.Label(apps_rail_hdr, text="◆", bg=_PALETTE["panel_mid"], fg=_PALETTE["accent"], font=(_UI_FONT, 8)).pack(
-            side="left", padx=(0, 5)
-        )
-        tk.Label(
-            apps_rail_hdr, text="APPS", bg=_PALETTE["panel_mid"], fg="#E8EDF4", font=(_TECH_FONT, 8, "bold")
-        ).pack(side="left")
-        self._mk_btn(
-            apps_rail_hdr,
-            "Toggle Apps ↗",
-            self._open_apps_popover,
-            bg=_PALETTE["well"],
-            fg=_PALETTE["arc_text"],
             padx=6,
             pady=1,
-            border_color="#485364",
+            border_color=_PALETTE["border"],
         ).pack(side="right")
-        self._rail_apps_lbl = tk.Label(
-            todos_card,
-            text="Gmail: Setup · Cal: Local",
+
+        self.todo_list_frame = tk.Frame(todos_card, bg=_PALETTE["panel_mid"])
+        self.todo_list_frame.pack(fill="both", expand=True)
+        self._todo_vars = []
+        self._render_todos(self._todo_items)
+
+        # Card 3: Agent Pipeline Progress
+        pipe_card = tk.Frame(
+            right_col,
+            bg=_PALETTE["panel_mid"],
+            highlightbackground=_PALETTE["border"],
+            highlightthickness=1,
+            padx=9,
+            pady=7,
+        )
+        pipe_card.pack(fill="x")
+
+        ap_hdr = tk.Frame(pipe_card, bg=_PALETTE["panel_mid"])
+        ap_hdr.pack(fill="x", pady=(0, 3))
+        tk.Label(
+            ap_hdr, text="Agent Pipeline", bg=_PALETTE["panel_mid"], fg="#EAF1F9", font=(_UI_FONT, 9, "bold")
+        ).pack(side="left")
+
+        ap_sub = tk.Frame(pipe_card, bg=_PALETTE["panel_mid"])
+        ap_sub.pack(fill="x", pady=(0, 4))
+        self.agent_status_lbl = tk.Label(
+            ap_sub,
+            text="@planner -> @coder",
             bg=_PALETTE["panel_mid"],
             fg=_PALETTE["muted"],
             font=(_MONO_FONT, 8),
             anchor="w",
         )
-        self._rail_apps_lbl.pack(fill="x", padx=10, pady=(0, 4))
-
-        # Divider + Active Agent Execution & Completion Progress under Apps
-        tk.Frame(todos_card, height=1, bg="#465163").pack(fill="x", padx=10, pady=(4, 6))
-
-        ap_hdr = tk.Frame(todos_card, bg=_PALETTE["panel_mid"])
-        ap_hdr.pack(fill="x", padx=10, pady=(0, 2))
-        tk.Label(ap_hdr, text="◆", bg=_PALETTE["panel_mid"], fg=_PALETTE["accent"], font=(_UI_FONT, 8)).pack(
-            side="left", padx=(0, 5)
-        )
-        tk.Label(
-            ap_hdr, text="AGENT", bg=_PALETTE["panel_mid"], fg="#E8EDF4", font=(_TECH_FONT, 8, "bold")
-        ).pack(side="left")
+        self.agent_status_lbl.pack(side="left")
         self.agent_prog_pct_lbl = tk.Label(
-            ap_hdr, text="Ready · 0%", bg=_PALETTE["panel_mid"], fg=_PALETTE["arc_text"], font=(_MONO_FONT, 8, "bold")
+            ap_sub, text="0%", bg=_PALETTE["panel_mid"], fg=_PALETTE["arc_text"], font=(_MONO_FONT, 8, "bold")
         )
         self.agent_prog_pct_lbl.pack(side="right")
 
-        self.agent_status_lbl = tk.Label(
-            todos_card,
-            text="✦ Auto (@planner → @coder)",
-            bg=_PALETTE["panel_mid"],
-            fg=_PALETTE["steel"],
-            font=(_UI_FONT, 8, "bold"),
-            anchor="w",
-        )
-        self.agent_status_lbl.pack(fill="x", padx=10, pady=(0, 4))
-
         self.agent_prog_canvas = tk.Canvas(
-            todos_card, height=6, bg=_PALETTE["well"], highlightthickness=0
+            pipe_card, height=5, bg=_PALETTE["well"], highlightthickness=0
         )
-        self.agent_prog_canvas.pack(fill="x", padx=10, pady=(0, 8))
+        self.agent_prog_canvas.pack(fill="x")
         self._agent_prog_fill = self.agent_prog_canvas.create_rectangle(
-            0, 0, 12, 6, fill=_PALETTE["accent"], outline=""
+            0, 0, 8, 5, fill=_PALETTE["accent"], outline=""
         )
+
+    def _toggle_todo_add_row(self) -> None:
+        self._todo_add_open = not getattr(self, "_todo_add_open", False)
+        if self._todo_add_open:
+            self.todo_add_row.pack(fill="x", pady=(0, 5), before=self.todo_list_frame)
+            try:
+                self.todo_add_entry.focus_set()
+            except Exception:
+                pass
+        else:
+            self.todo_add_row.pack_forget()
+
+    def _switch_right_subview(self, target: str) -> None:
+        cur = getattr(self, "_right_subview", "summary")
+        nxt = "summary" if cur == target else target
+        self._right_subview = nxt
+        for f in (self.briefing_list_frame, self.agenda_list_frame, self.gmail_list_frame):
+            f.pack_forget()
+        if nxt == "agenda":
+            self.agenda_list_frame.pack(fill="x", pady=(0, 6), before=self._summary_cta_btn)
+            if not self.agenda_list_frame.winfo_children():
+                self._run_quick("what is on my calendar today?")
+        elif nxt == "gmail":
+            self.gmail_list_frame.pack(fill="x", pady=(0, 6), before=self._summary_cta_btn)
+            if not self.gmail_list_frame.winfo_children():
+                self._run_quick("check my unread emails")
+        else:
+            self.briefing_list_frame.pack(fill="x", pady=(0, 6), before=self._summary_cta_btn)
 
     def _build_section_header(
         self,
@@ -3206,6 +3801,35 @@ class DynamicIslandPill:
     def _open_agent_menu(self) -> None:
         self._close_model_popover()
         self._close_tools_popover()
+        self._close_apps_popover()
+        self._close_persona_popover()
+        if self.expanded and hasattr(self, "agent_popover"):
+            if getattr(self, "_agent_popover_visible", False):
+                self._close_agent_popover()
+                return
+            theme = _get_persona_theme(self.persona)
+            self.agent_popover.configure(highlightbackground=theme["arc_border"])
+            for lbl, btn in getattr(self, "_agent_pop_rows", {}).items():
+                sel = lbl == f"@{self.selected_agent}"
+                btn.configure(
+                    bg=theme["pill_bg"] if sel else "#121C2A",
+                    fg=theme["pill_fg"] if sel else _PALETTE["text"],
+                )
+            self._agent_popover_visible = True
+            try:
+                self.frame.update_idletasks()
+                self.agent_popover.update_idletasks()
+                pop_w = max(130, self.agent_popover.winfo_reqwidth() or 140)
+                pop_h = max(120, self.agent_popover.winfo_reqheight() or 175)
+                fw = max(480, self.frame.winfo_width() or 960)
+                bx = max(12, min(self.agent_btn.winfo_rootx() - self.frame.winfo_rootx(), fw - pop_w - 12))
+                btn_top = self.agent_btn.winfo_rooty() - self.frame.winfo_rooty()
+                by = max(56, btn_top - pop_h - 4)
+            except Exception:
+                bx, by = 480, 180
+            self.agent_popover.place(in_=self.frame, x=bx, y=by)
+            self.agent_popover.lift()
+            return
         self._popup_open = True
         try:
             bx = self.agent_btn.winfo_rootx()
@@ -3222,6 +3846,8 @@ class DynamicIslandPill:
     def _open_model_menu(self) -> None:
         self._close_apps_popover()
         self._close_tools_popover()
+        self._close_persona_popover()
+        self._close_agent_popover()
         if self.expanded:
             if getattr(self, "_model_popover_visible", False):
                 self._close_model_popover()
@@ -3286,10 +3912,10 @@ class DynamicIslandPill:
     def _toggle_reasoning(self) -> None:
         self._reasoning_open = not self._reasoning_open
         if self._reasoning_open:
-            self.reasoning_btn.configure(text="▴  Reasoning steps")
+            self.reasoning_btn.configure(text="▴  Reasoning Trace")
             self.reasoning_detail_lbl.pack(side="top", fill="x", padx=12, pady=(0, 6), before=self.output)
         else:
-            self.reasoning_btn.configure(text="▾  Reasoning steps")
+            self.reasoning_btn.configure(text="▾  Reasoning Trace")
             self.reasoning_detail_lbl.pack_forget()
 
     def _toggle_agenda_calendar(self) -> None:
@@ -3479,10 +4105,10 @@ class DynamicIslandPill:
     def _refresh_todo_progress(self) -> None:
         total = len(self._todo_vars)
         done = sum(1 for v in self._todo_vars if v.get())
-        self.todo_count_lbl.configure(text=f"{done} of {total} done")
-        w = max(120, self.todo_prog_canvas.winfo_width() or 240)
+        self.todo_count_lbl.configure(text=f"({done}/{total})")
+        w = max(120, self.todo_prog_canvas.winfo_width() or 210)
         fill_w = int(w * (done / total)) if total > 0 else 0
-        self.todo_prog_canvas.coords(self._todo_prog_fill, 0, 0, fill_w, 5)
+        self.todo_prog_canvas.coords(self._todo_prog_fill, 0, 0, fill_w, 4)
 
     def _apply_dashboard(self, snap: dict[str, Any]) -> None:
         if not isinstance(snap, dict):
@@ -3527,21 +4153,22 @@ class DynamicIslandPill:
         {"chat": self.chat_panel, "agents": self.agents_panel, "deck": self.deck_panel}[target].pack(
             fill="both", expand=True
         )
+        theme = _get_persona_theme(getattr(self, "persona", "off"))
         for key, btn in self.tab_btns.items():
             active = key == target
             btn.configure(
-                bg=_PALETTE["pill_active_bg"] if active else _PALETTE["bg"],
-                fg=_PALETTE["arc_text"] if active else "#C3CCD8",
-                highlightbackground=_PALETTE["arc_border"] if active else "#5A667A",
+                bg=theme["pill_bg"] if active else _PALETTE["well"],
+                fg=theme["pill_fg"] if active else "#C8D5E4",
+                highlightbackground=theme["arc_border"] if active else _PALETTE["well"],
             )
 
     def select_agent(self, agent_role: str, *, switch_to_chat: bool = False) -> None:
         """Select a sequential specialist agent ('auto' or SPECIALIST_AGENTS key)."""
         norm = normalize_agent_role(agent_role)
         self.selected_agent = norm
-        short = "Auto" if norm == "auto" else norm.capitalize()
+        short = "auto" if norm == "auto" else norm.capitalize()
         self.agent_btn.configure(
-            text=f"✦ {short} ▾",
+            text=f"@{short} ▴",
             bg=_PALETTE["pill_active_bg"] if norm != "auto" else _PALETTE["well"],
             fg=_PALETTE["arc_text"] if norm != "auto" else _PALETTE["accent"],
         )
@@ -3576,20 +4203,21 @@ class DynamicIslandPill:
         self._agent_progress_pct = clamped
         norm = getattr(self, "selected_agent", "auto")
         if norm == "auto":
-            agent_desc = "✦ Auto (@planner → @coder)"
+            agent_desc = "@planner -> @coder"
         elif norm in SPECIALIST_AGENTS:
             agent_desc = f"@{norm} · {SPECIALIST_AGENTS[norm]['label']}"
         else:
             agent_desc = f"@{norm}"
         try:
             self.agent_status_lbl.configure(text=agent_desc)
+            pct_txt = f"{clamped}%" if status_word == "Ready" else f"{status_word} · {clamped}%"
             self.agent_prog_pct_lbl.configure(
-                text=f"{status_word} · {clamped}%",
+                text=pct_txt,
                 fg=_PALETTE["accent"] if clamped > 0 else _PALETTE["arc_text"],
             )
-            w = max(120, self.agent_prog_canvas.winfo_width() or 240)
-            fill_w = int(w * (clamped / 100.0)) if clamped > 0 else 10
-            self.agent_prog_canvas.coords(self._agent_prog_fill, 0, 0, max(6, fill_w), 6)
+            w = max(120, self.agent_prog_canvas.winfo_width() or 210)
+            fill_w = int(w * (clamped / 100.0)) if clamped > 0 else 8
+            self.agent_prog_canvas.coords(self._agent_prog_fill, 0, 0, max(6, fill_w), 5)
         except Exception:
             pass
 
@@ -3631,14 +4259,22 @@ class DynamicIslandPill:
 
         stats = self._telemetry.sample()
         bat_str = f"Battery {stats['battery_pct']}%" if stats["battery_pct"] is not None else "AC Power"
-        self.capsule_tel_lbl.configure(
-            text=f"CPU {stats['cpu_pct']}%   RAM {stats['ram_pct']}%   {bat_str}   Enter to send · Esc to hide"
+        tel_items = [f"CPU: {stats['cpu_pct']}%", f"RAM: {stats['ram_pct']}%"]
+        if stats.get("gpu_pct") is not None:
+            tel_items.append(f"GPU: {stats['gpu_pct']}%")
+        if stats.get("vram_pct") is not None:
+            tel_items.append(f"VRAM: {stats['vram_pct']}%")
+        self.capsule_tel_lbl.configure(text="· " + " · ".join(tel_items))
+        self.bat_pill_lbl.configure(text=f"🔋 {bat_str}" if stats["battery_pct"] is not None else "⚡ AC Power")
+        gpu_line = (
+            f"\nGPU / VRAM:{stats['gpu_pct']}% / {stats['vram_pct']}%"
+            if stats.get("gpu_pct") is not None
+            else ""
         )
-        self.bat_pill_lbl.configure(text=bat_str)
         self.deck_tel_lbl.configure(
-            text=f"CPU Load:  {stats['cpu_pct']}%\nRAM Usage: {stats['ram_pct']}%\nPower:     {bat_str}\nModel:     {self.active_model_name}"
+            text=f"CPU Load:  {stats['cpu_pct']}%\nRAM Usage: {stats['ram_pct']}%{gpu_line}\nPower:     {bat_str}\nModel:     {self.active_model_name}"
         )
-        self._ensure_pinned_visible()
+        self._sync_topmost_pin(force=False)
         self._telemetry_ticks += 1
         poll_every = 1 if (self.busy or self.voice_speaking) else 2
         if self._telemetry_ticks % poll_every == 0 and not os.environ.get("PYTEST_CURRENT_TEST"):
@@ -3815,22 +4451,13 @@ class DynamicIslandPill:
             try:
                 top_hwnd = _get_top_hwnd(self.root.winfo_id())
                 if top_hwnd:
-                    u32 = ctypes.WinDLL("user32", use_last_error=True)
-                    u32.SetWindowPos.argtypes = [
-                        wintypes.HWND,
-                        wintypes.HWND,
-                        ctypes.c_int,
-                        ctypes.c_int,
-                        ctypes.c_int,
-                        ctypes.c_int,
-                        wintypes.UINT,
-                    ]
-                    u32.SetWindowPos.restype = wintypes.BOOL
-                    # SWP_NOZORDER | SWP_NOREDRAW | SWP_NOACTIVATE = 0x001C
-                    u32.SetWindowPos(wintypes.HWND(top_hwnd), None, g.x, g.y, g.width, g.height, 0x001C)
-                    if rgn_key != self._last_rgn_key:
+                    u32 = _get_win32().get("u32")
+                    if u32 is not None:
+                        # SWP_NOZORDER | SWP_NOREDRAW | SWP_NOACTIVATE = 0x001C
+                        u32.SetWindowPos(wintypes.HWND(top_hwnd), None, g.x, g.y, g.width, g.height, 0x001C)
+                    if not animate_step and rgn_key != self._last_rgn_key:
                         self._last_rgn_key = rgn_key
-                        apply_window_region(top_hwnd, g.width, g.height, r, top_flush=top_flush, redraw=(not animate_step))
+                        apply_window_region(top_hwnd, g.width, g.height, r, top_flush=top_flush, redraw=True)
             except Exception:
                 pass
 
@@ -3859,17 +4486,14 @@ class DynamicIslandPill:
             elif not self.expanded and self.drawer.winfo_manager():
                 self.drawer.pack_forget()
             self._apply_geometry_box(target, animate_step=False)
-            self._img_refs["brow"] = _draw_brow_crest(
-                self.brow_canvas, target.width, expanded=self.expanded, bg_hex=_PALETTE["bg"]
-            )
             return
 
-        # Pre-pack drawer BEFORE step 0 when expanding so Tkinter computes child geometry once instead of stalling mid-flight.
+        # Pre-pack drawer BEFORE step 0 when expanding so Tkinter computes child geometry once cleanly
         if self.expanded and not self.drawer.winfo_manager():
             self.drawer.pack(fill="both", expand=True)
             self.root.update_idletasks()
 
-        frames = compute_spring_frames(animate_from, target, steps=18)
+        frames = compute_spring_frames(animate_from, target, steps=12)
 
         def _step(idx: int) -> None:
             if self._closing or idx >= len(frames):
@@ -3881,38 +4505,42 @@ class DynamicIslandPill:
                 self._pending_collapse_drawer = False
                 if self.drawer.winfo_manager():
                     self.drawer.pack_forget()
-                self.frame.configure(bg=_PALETTE["gunmetal"], highlightthickness=0)
+                self.frame.configure(bg=_PALETTE["gunmetal"])
             self._apply_geometry_box(frame_geo, animate_step=(not is_last))
             if is_last:
-                self._img_refs["brow"] = _draw_brow_crest(
-                    self.brow_canvas, frame_geo.width, expanded=self.expanded, bg_hex=_PALETTE["bg"]
-                )
                 self._anim_after_id = None
             else:
-                self._anim_after_id = self.root.after(9, lambda: _step(idx + 1))
+                self._anim_after_id = self.root.after(10, lambda: _step(idx + 1))
 
         _step(0)
 
     def _apply_state_layout(self, *, defer_drawer: bool = False, keep_drawer: bool = False) -> None:
-        # Cleanly repack only the widgets belonging to compact / shuttered / expanded
         self._close_model_popover()
         self._close_apps_popover()
         self._close_tools_popover()
+        self._close_persona_popover()
+        self._close_agent_popover()
         self.shuttered_bar.pack_forget()
         if not keep_drawer:
             self.drawer.pack_forget()
         self.header.pack_forget()
         self.brow_canvas.pack_forget()
         self.pill_label.pack_forget()
+        self.hdr_brand.pack_forget()
+        self.nav_pill_bar.pack_forget()
+        self.wave_stack.pack_forget()
+        self.hdr_rw_btn.pack_forget()
+        self.compact_rw_btn.pack_forget()
         self.compact_voice_btn.pack_forget()
         self.mic_lbl_hdr.pack_forget()
+        self.capsule_mic_btn.pack_forget()
         self.hdr_stop_btn.pack_forget()
         self.apps_btn.pack_forget()
         self.shutter_btn.pack_forget()
         self.shutdown_btn.pack_forget()
 
         if self.shuttered and not self.expanded:
-            self.frame.configure(bg=_PALETTE["gunmetal"], highlightthickness=0)
+            self.frame.configure(bg=_PALETTE["gunmetal"])
             self.shuttered_bar.pack(fill="both", expand=True)
             self._img_refs["wake_sw"] = self._draw_switch(self.wake_switch_canvas, active=False, bg_hex=_PALETTE["gunmetal"])
             self.island_state = "shuttered"
@@ -3920,53 +4548,55 @@ class DynamicIslandPill:
 
         if self.expanded:
             self.island_state = "expanded"
-            self.frame.configure(bg=_PALETTE["bg"], highlightthickness=0)
-            self.brow_canvas.pack(side="top", fill="x", padx=4)
-            self.header.configure(bg=_PALETTE["hdr_bar"], height=52, highlightthickness=1)
-            self.orb_canvas.configure(bg=_PALETTE["hdr_bar"], width=40, height=40)
+            self.frame.configure(bg=_PALETTE["bg"])
+            self.brow_canvas.pack(side="top", fill="x", padx=2)
+            self.header.configure(bg=_PALETTE["hdr_bar"], height=48, highlightthickness=1)
+            self.orb_canvas.configure(bg=_PALETTE["hdr_bar"], width=34, height=34)
             self.orb_canvas.pack_configure(padx=(6, 4))
-            self.wave_stack.configure(bg=_PALETTE["hdr_bar"])
-            self.wave_canvas.configure(bg=_PALETTE["hdr_bar"], width=120, height=28)
+            self.hdr_brand.configure(bg=_PALETTE["hdr_bar"])
+            self.hdr_brand.pack(side="left", padx=(2, 6))
             self.hdr_right.configure(bg=_PALETTE["hdr_bar"])
             self.hdr_right.pack_configure(padx=(4, 8))
-            self.mic_lbl_hdr.configure(bg=_PALETTE["hdr_bar"])
-            self.capsule_mic_btn.configure(bg=_PALETTE["hdr_bar"])
             self.stop_canvas.configure(bg=_PALETTE["hdr_bar"])
             if self._orb_eye_item and self._img_refs.get("eye_expanded") is not None:
-                self.orb_canvas.coords(self._orb_eye_item, 20, 20)
+                self.orb_canvas.coords(self._orb_eye_item, 17, 17)
                 self.orb_canvas.itemconfigure(self._orb_eye_item, image=self._img_refs["eye_expanded"])
-            self.header.pack(side="top", fill="x", padx=8, pady=(1, 4))
-            self.pill_label.pack(side="bottom", pady=(0, 2))
-            self.shutdown_btn.configure(text="⏻ Off", padx=6, pady=2)
+            self.shutdown_btn.configure(text="Off", padx=12, pady=2)
             self.shutdown_btn.pack(side="right", padx=(4, 0))
-            self.shutter_btn.pack(side="right", padx=(4, 0))
-            self.hdr_stop_btn.pack(side="right", padx=(4, 0))
-            self.apps_btn.pack(side="right", padx=(4, 0))
-            self.mic_lbl_hdr.pack(side="left", padx=(0, 3), before=self.capsule_mic_btn)
+            self.shutter_btn.pack(side="right", padx=(3, 0))
+            self.hdr_stop_btn.pack(side="right", padx=(3, 0))
+            self.apps_btn.pack(side="right", padx=(3, 0))
+            self.hdr_rw_btn.pack(side="right", padx=(3, 2))
+            self.nav_pill_bar.pack(side="left", expand=True, padx=(4, 4))
+            self.header.pack(side="top", fill="x", padx=8, pady=(0, 3))
             if not defer_drawer:
                 self.drawer.pack(fill="both", expand=True)
         else:
             self.island_state = "compact"
-            self.frame.configure(bg=_PALETTE["bg"] if keep_drawer else _PALETTE["gunmetal"], highlightthickness=0)
-            self.header.configure(bg=_PALETTE["gunmetal"], height=40, highlightthickness=0)
-            self.orb_canvas.configure(bg=_PALETTE["gunmetal"], width=32, height=32)
+            self.frame.configure(bg=_PALETTE["bg"] if keep_drawer else _PALETTE["gunmetal"])
+            self.header.configure(bg=_PALETTE["gunmetal"], height=38, highlightthickness=1)
+            self.orb_canvas.configure(bg=_PALETTE["gunmetal"], width=30, height=30)
             self.orb_canvas.pack_configure(padx=(4, 2))
             self.wave_stack.configure(bg=_PALETTE["gunmetal"])
-            self.wave_canvas.configure(bg=_PALETTE["gunmetal"], width=92, height=28)
+            self.wave_canvas.configure(bg=_PALETTE["gunmetal"], width=94, height=28)
+            self.wave_stack.pack(side="left", fill="both", expand=True, padx=(2, 2))
             self.hdr_right.configure(bg=_PALETTE["gunmetal"])
-            self.hdr_right.pack_configure(padx=(2, 6))
+            self.hdr_right.pack_configure(padx=(2, 4))
             self.capsule_mic_btn.configure(bg=_PALETTE["gunmetal"])
             self.stop_canvas.configure(bg=_PALETTE["gunmetal"])
             if self._orb_eye_item and self._img_refs.get("eye_compact") is not None:
-                self.orb_canvas.coords(self._orb_eye_item, 16, 16)
+                self.orb_canvas.coords(self._orb_eye_item, 15, 15)
                 self.orb_canvas.itemconfigure(self._orb_eye_item, image=self._img_refs["eye_compact"])
-            self.header.pack(side="top", fill="both", expand=True, padx=4, pady=0)
-            self.shutdown_btn.configure(text="⏻", padx=6, pady=2)
+            self.shutdown_btn.configure(text="⏻", padx=7, pady=1)
             self.shutdown_btn.pack(side="right", padx=(3, 0))
-            self.compact_voice_btn.pack(side="left", padx=(0, 4), before=self.capsule_mic_btn)
+            self.compact_rw_btn.pack(side="left", padx=(0, 3))
+            self.compact_voice_btn.pack(side="left", padx=(0, 2))
+            self.capsule_mic_btn.pack(side="left", padx=(0, 2))
+            self.header.pack(side="top", fill="both", expand=True, padx=4, pady=1)
             if keep_drawer and not self.drawer.winfo_manager():
                 self.drawer.pack(fill="both", expand=True)
 
+        self._apply_persona_theme()
         self._update_header()
         self._sync_mic_buttons("listening" if self.mic_enabled else "off")
 
@@ -3979,6 +4609,12 @@ class DynamicIslandPill:
             return
         if getattr(self, "_tools_popover_visible", False):
             self._close_tools_popover()
+            return
+        if getattr(self, "_persona_popover_visible", False):
+            self._close_persona_popover()
+            return
+        if getattr(self, "_agent_popover_visible", False):
+            self._close_agent_popover()
             return
         self.collapse()
 
@@ -3993,6 +4629,8 @@ class DynamicIslandPill:
             or getattr(self, "_model_popover_visible", False)
             or getattr(self, "_apps_popover_visible", False)
             or getattr(self, "_tools_popover_visible", False)
+            or getattr(self, "_persona_popover_visible", False)
+            or getattr(self, "_agent_popover_visible", False)
         ):
             return
         try:
@@ -4008,6 +4646,8 @@ class DynamicIslandPill:
             or getattr(self, "_model_popover_visible", False)
             or getattr(self, "_apps_popover_visible", False)
             or getattr(self, "_tools_popover_visible", False)
+            or getattr(self, "_persona_popover_visible", False)
+            or getattr(self, "_agent_popover_visible", False)
         ):
             return
         if not self._had_focus or time.monotonic() - self._last_expand_time < 0.35:
@@ -4041,6 +4681,8 @@ class DynamicIslandPill:
         self._close_model_popover()
         self._close_apps_popover()
         self._close_tools_popover()
+        self._close_persona_popover()
+        self._close_agent_popover()
         self.collapse()
         return True
 
@@ -4051,7 +4693,7 @@ class DynamicIslandPill:
             alpha = float(self.root.attributes("-alpha") or 1.0)
             if alpha <= 0.05 or time.monotonic() - self._last_expand_time < 0.35:
                 return
-            user32 = ctypes.windll.user32
+            user32 = _get_win32().get("u32") or ctypes.windll.user32
             down = bool((user32.GetAsyncKeyState(0x01) & 0x8000) or (user32.GetAsyncKeyState(0x02) & 0x8000))
             was_down = self._prev_mouse_down
             self._prev_mouse_down = down
@@ -4060,48 +4702,65 @@ class DynamicIslandPill:
             pt = wintypes.POINT()
             if not user32.GetCursorPos(ctypes.byref(pt)):
                 return
-            if getattr(self, "_model_popover_visible", False):
-                px = self.model_popover.winfo_rootx()
-                py = self.model_popover.winfo_rooty()
-                pw = self.model_popover.winfo_width()
-                ph = self.model_popover.winfo_height()
-                bx = self.model_btn.winfo_rootx()
-                by = self.model_btn.winfo_rooty()
-                bw = self.model_btn.winfo_width()
-                bh = self.model_btn.winfo_height()
-                in_pop = px <= pt.x <= px + pw and py <= pt.y <= py + ph
-                in_btn = bx <= pt.x <= bx + bw and by <= pt.y <= by + bh
-                if not in_pop and not in_btn:
-                    self._close_model_popover()
-            if getattr(self, "_apps_popover_visible", False):
-                ax = self.apps_popover.winfo_rootx()
-                ay = self.apps_popover.winfo_rooty()
-                aw = self.apps_popover.winfo_width()
-                ah = self.apps_popover.winfo_height()
-                abx = self.apps_btn.winfo_rootx()
-                aby = self.apps_btn.winfo_rooty()
-                abw = self.apps_btn.winfo_width()
-                abh = self.apps_btn.winfo_height()
-                in_apop = ax <= pt.x <= ax + aw and ay <= pt.y <= ay + ah
-                in_abtn = abx <= pt.x <= abx + abw and aby <= pt.y <= aby + abh
-                if not in_apop and not in_abtn:
-                    self._close_apps_popover()
-            if getattr(self, "_tools_popover_visible", False):
-                tx = self.tools_popover.winfo_rootx()
-                ty = self.tools_popover.winfo_rooty()
-                tw = self.tools_popover.winfo_width()
-                th = self.tools_popover.winfo_height()
-                tbx = self.tools_btn.winfo_rootx()
-                tby = self.tools_btn.winfo_rooty()
-                tbw = self.tools_btn.winfo_width()
-                tbh = self.tools_btn.winfo_height()
-                in_tpop = tx <= pt.x <= tx + tw and ty <= pt.y <= ty + th
-                in_tbtn = tbx <= pt.x <= tbx + tbw and tby <= pt.y <= tby + tbh
-                if not in_tpop and not in_tbtn:
-                    self._close_tools_popover()
+            for vis_attr, pop_attr, btn_attr, close_fn in (
+                ("_model_popover_visible", "model_popover", "model_btn", self._close_model_popover),
+                ("_apps_popover_visible", "apps_popover", "apps_btn", self._close_apps_popover),
+                ("_tools_popover_visible", "tools_popover", "tools_btn", self._close_tools_popover),
+                ("_persona_popover_visible", "persona_popover", "persona_btn", self._close_persona_popover),
+                ("_agent_popover_visible", "agent_popover", "agent_btn", self._close_agent_popover),
+            ):
+                if getattr(self, vis_attr, False) and hasattr(self, pop_attr) and hasattr(self, btn_attr):
+                    pop = getattr(self, pop_attr)
+                    btn = getattr(self, btn_attr)
+                    px, py, pw, ph = pop.winfo_rootx(), pop.winfo_rooty(), pop.winfo_width(), pop.winfo_height()
+                    bx, by, bw, bh = btn.winfo_rootx(), btn.winfo_rooty(), btn.winfo_width(), btn.winfo_height()
+                    in_pop = px <= pt.x <= px + pw and py <= pt.y <= py + ph
+                    in_btn = bx <= pt.x <= bx + bw and by <= pt.y <= by + bh
+                    if not in_pop and not in_btn:
+                        close_fn()
             self.check_outside_click(int(pt.x), int(pt.y))
         except Exception:
             pass
+
+    def _on_pill_press(self, event: tk.Event[Any]) -> None:
+        self._drag_anchor = (
+            int(getattr(event, "x_root", event.x)),
+            int(getattr(event, "y_root", event.y)),
+            int(self.root.winfo_x()),
+            int(self.root.winfo_y()),
+            False,
+        )
+
+    def _on_pill_drag(self, event: tk.Event[Any]) -> None:
+        anchor = getattr(self, "_drag_anchor", None)
+        if anchor is None:
+            return
+        sx, sy, wx, wy, _ = anchor
+        ex = int(getattr(event, "x_root", event.x))
+        ey = int(getattr(event, "y_root", event.y))
+        dx, dy = ex - sx, ey - sy
+        if abs(dx) >= 4 or abs(dy) >= 4:
+            self._drag_anchor = (sx, sy, wx, wy, True)
+            nx, ny = wx + dx, max(0, wy + dy)
+            u32 = _get_win32().get("u32") if sys.platform == "win32" else None
+            top_hwnd = _get_top_hwnd(self.root.winfo_id()) if u32 is not None else 0
+            if u32 is not None and top_hwnd and not os.environ.get("PYTEST_CURRENT_TEST"):
+                # SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE = 0x0015
+                u32.SetWindowPos(wintypes.HWND(top_hwnd), None, nx, ny, 0, 0, 0x0015)
+            else:
+                self.root.geometry(f"+{nx}+{ny}")
+
+    def _on_pill_release(self, event: tk.Event[Any]) -> None:
+        anchor = getattr(self, "_drag_anchor", None)
+        self._drag_anchor = None
+        if anchor is not None and anchor[4]:
+            return
+        if self.shuttered:
+            self.wake_from_shutter()
+        elif not self.expanded:
+            self.expand()
+        elif event.widget is self.orb_canvas:
+            self.collapse()
 
     def _on_pill_click(self, event: tk.Event[Any]) -> None:
         self._drag_offset = (event.x, event.y)
@@ -4113,18 +4772,21 @@ class DynamicIslandPill:
             if event.widget is self.orb_canvas:
                 self.collapse()
 
-    def _on_pill_drag(self, event: tk.Event[Any]) -> None:
-        dx = event.x - self._drag_offset[0]
-        dy = event.y - self._drag_offset[1]
-        self.root.geometry(f"+{self.root.winfo_x() + dx}+{self.root.winfo_y() + dy}")
+    def _close_all_popovers(self) -> None:
+        for fn_name in (
+            "_close_model_popover",
+            "_close_apps_popover",
+            "_close_tools_popover",
+            "_close_persona_popover",
+            "_close_agent_popover",
+        ):
+            fn = getattr(self, fn_name, None)
+            if callable(fn):
+                fn()
 
     def enter_shuttered(self) -> None:
         """Transition to State 02 · Shuttered standby (eye slit, voice & agents asleep)."""
-        self._close_model_popover()
-        self._close_apps_popover()
-        close_tools = getattr(self, "_close_tools_popover", None)
-        if close_tools is not None:
-            close_tools()
+        DynamicIslandPill._close_all_popovers(self)
         sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
         prev_geo = self._current_geo or compute_island_geometry(sw, sh, expanded=self.expanded, shuttered=self.shuttered)
         if self.mic_enabled:
@@ -4158,39 +4820,40 @@ class DynamicIslandPill:
         else:
             self.enter_shuttered()
 
-    def _ensure_pinned_visible(self) -> None:
-        """Keep the Dynamic Island un-minimized and topmost across Edge/desktop minimizes."""
+    def _sync_topmost_pin(self, *, force: bool = False) -> None:
+        """Keep the Dynamic Island un-minimized and topmost cleanly without 1Hz Win32 DWM hitches."""
         if self._closing:
             return
         try:
-            if self.root.state() in ("iconic", "withdrawn"):
+            state = self.root.state()
+            if state in ("iconic", "withdrawn"):
                 self.root.deiconify()
-            self.root.attributes("-topmost", True)
-            self.root.lift()
+                force = True
+            if force:
+                self.root.attributes("-topmost", True)
+                self.root.lift()
             if sys.platform == "win32" and not os.environ.get("PYTEST_CURRENT_TEST"):
-                u32 = ctypes.WinDLL("user32", use_last_error=True)
-                u32.IsIconic.argtypes = [wintypes.HWND]
-                u32.IsIconic.restype = wintypes.BOOL
-                u32.IsWindowVisible.argtypes = [wintypes.HWND]
-                u32.IsWindowVisible.restype = wintypes.BOOL
-                u32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
-                u32.ShowWindow.restype = wintypes.BOOL
-                u32.SetWindowPos.argtypes = [
-                    wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
-                    ctypes.c_int, ctypes.c_int, wintypes.UINT,
-                ]
-                u32.SetWindowPos.restype = wintypes.BOOL
-                top = _get_top_hwnd(self.root.winfo_id())
-                if top:
+                u32 = _get_win32().get("u32")
+                top = _get_top_hwnd(self.root.winfo_id()) if u32 is not None else 0
+                if u32 is not None and top:
                     hwnd = wintypes.HWND(top)
-                    if u32.IsIconic(hwnd):
+                    iconic = bool(u32.IsIconic(hwnd))
+                    visible = bool(u32.IsWindowVisible(hwnd))
+                    is_topmost = bool(u32.GetWindowLongW(hwnd, GWL_EXSTYLE) & 0x00000008)  # WS_EX_TOPMOST
+                    if iconic:
                         u32.ShowWindow(hwnd, 9)  # SW_RESTORE
-                    elif not u32.IsWindowVisible(hwnd):
+                        force = True
+                    elif not visible:
                         u32.ShowWindow(hwnd, 4)  # SW_SHOWNOACTIVATE
-                    # HWND_TOPMOST=-1, SWP_NOSIZE|SWP_NOMOVE|SWP_NOACTIVATE|SWP_SHOWWINDOW=0x0053
-                    u32.SetWindowPos(hwnd, wintypes.HWND(-1), 0, 0, 0, 0, 0x0053)
+                        force = True
+                    if force or not is_topmost:
+                        # HWND_TOPMOST=-1, SWP_NOSIZE|SWP_NOMOVE|SWP_NOACTIVATE|SWP_SHOWWINDOW=0x0053
+                        u32.SetWindowPos(hwnd, wintypes.HWND(-1), 0, 0, 0, 0, 0x0053)
         except Exception:
             pass
+
+    def _ensure_pinned_visible(self) -> None:
+        self._sync_topmost_pin(force=True)
 
     def wake_and_expand(self, *, from_event: bool = False) -> None:
         """Bring the running Dynamic Island to the front and expand its UI."""
@@ -4221,11 +4884,7 @@ class DynamicIslandPill:
 
     def collapse(self) -> None:
         """Transition back to State 01 · Compact Dynamic Island with spring motion."""
-        self._close_model_popover()
-        self._close_apps_popover()
-        close_tools = getattr(self, "_close_tools_popover", None)
-        if close_tools is not None:
-            close_tools()
+        DynamicIslandPill._close_all_popovers(self)
         if self.expanded:
             sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
             prev_geo = self._current_geo or compute_island_geometry(sw, sh, expanded=True, shuttered=False)
@@ -4316,34 +4975,51 @@ class DynamicIslandPill:
             pass
 
     def _update_header(self) -> None:
+        theme = _get_persona_theme(getattr(self, "persona", "off"))
         disp_m = (
             _format_cloud_model_label(self.active_model_name)
             if str(self.active_model_name).startswith("cloud:")
             else self.active_model_name
         )
         short_m = disp_m if len(disp_m) <= 20 else f"{disp_m[:19]}…"
-        self.model_btn.configure(text=f"⌃ {short_m} ▾")
+        self.model_btn.configure(text=f"{short_m} ▴")
 
         status_txt = self.state_label
         if status_txt == "AURA Jarvis":
             status_txt = "ULTRON VOICE · STANDBY"
         self.pill_label.configure(text=status_txt.upper())
+
+        rw_active = not self.read_only
         self.mode_btn.configure(
-            text="RO" if self.read_only else "RW",
-            fg=_PALETTE["blue"] if self.read_only else _PALETTE["amber"],
+            text="● RO: Read-Only" if self.read_only else "● RW: Read-Write",
+            fg=_PALETTE["amber"] if self.read_only else theme["accent"],
         )
+        if hasattr(self, "hdr_rw_btn"):
+            self.hdr_rw_btn.configure(
+                text="⚡ RW Mode: OFF" if self.read_only else "⚡ RW Mode: ON",
+                bg=_PALETTE["well"] if self.read_only else theme["pill_bg"],
+                fg=_PALETTE["amber"] if self.read_only else theme["pill_fg"],
+                highlightbackground=_PALETTE["border"] if self.read_only else theme["arc_border"],
+            )
+        if hasattr(self, "compact_rw_btn"):
+            self.compact_rw_btn.configure(
+                text="⚡ RO" if self.read_only else "⚡ RW: ON",
+                bg=_PALETTE["well"] if self.read_only else theme["pill_bg"],
+                fg=_PALETTE["amber"] if self.read_only else theme["pill_fg"],
+                highlightbackground=_PALETTE["border"] if self.read_only else theme["arc_border"],
+            )
         if hasattr(self, "voice_btn"):
             self.voice_btn.configure(text=_PERSONA_LABELS.get(self.persona, "Voice: Off"))
         if hasattr(self, "compact_voice_btn"):
-            vshort = {"jarvis": "🔊 J", "ultron": "🔊 U", "megatron": "🔊 M"}.get(self.persona, "🔇")
+            vshort = {"jarvis": "🔊", "ultron": "🔊", "megatron": "🔊"}.get(self.persona, "🔇")
             self.compact_voice_btn.configure(
                 text=vshort,
-                fg=_PALETTE["accent"] if self.persona != "off" else _PALETTE["muted"],
+                fg=theme["accent"] if self.persona != "off" else _PALETTE["muted"],
             )
         if hasattr(self, "ollama_btn"):
             self.ollama_btn.configure(
                 text="● Ollama" if self.ollama_up else "● Start Ollama",
-                fg=_PALETTE["accent"] if self.ollama_up else _PALETTE["amber"],
+                fg="#34D399" if self.ollama_up else _PALETTE["amber"],
             )
 
     def _append_rich(self, segments: list[tuple[str, str]]) -> None:
@@ -4423,8 +5099,9 @@ class DynamicIslandPill:
             if norm != self.selected_agent:
                 self.select_agent(norm)
         v = st.get("voice") or {}
-        if v.get("persona") in _PERSONA_CYCLE:
+        if v.get("persona") in _PERSONA_CYCLE and v["persona"] != self.persona:
             self.persona = v["persona"]
+            self._apply_persona_theme()
         if ("speaking" in v or "actively_playing" in v) and not self.busy:
             if time.monotonic() >= getattr(self, "_voice_bargein_until", 0.0):
                 self.voice_speaking = bool(v.get("actively_playing", v.get("speaking")))
@@ -4456,6 +5133,10 @@ class DynamicIslandPill:
         self._mode_switching = True
         next_mode = "rw" if self.read_only else "ro"
         self.mode_btn.configure(text=f"{next_mode.upper()}...")
+        if hasattr(self, "hdr_rw_btn"):
+            self.hdr_rw_btn.configure(text="⚡ Switching...")
+        if hasattr(self, "compact_rw_btn"):
+            self.compact_rw_btn.configure(text="⚡ ...")
 
         def _job() -> None:
             try:
@@ -4475,6 +5156,7 @@ class DynamicIslandPill:
     def _cycle_persona(self) -> None:
         target = next_persona(self.persona)
         self.persona = target
+        self._apply_persona_theme()
         self._update_header()
 
         def _job() -> None:
@@ -4542,13 +5224,13 @@ class DynamicIslandPill:
                     if self.expanded:
                         self.stop_canvas.pack(side="left", padx=(0, 6))
                     else:
-                        self.stop_canvas.pack(side="left", padx=(0, 6), before=self.compact_voice_btn)
+                        self.stop_canvas.pack(side="left", padx=(0, 4), before=self.compact_rw_btn)
                 if self.busy:
                     self.send_btn.configure(text="➤ Push", bg="#1D4ED8", fg="#F2F8FF")
                 else:
                     self.send_btn.configure(text="■ Stop", bg=_PALETTE["danger_bg"], fg=_PALETTE["danger_fg"])
                 self.composer_stop_btn.configure(
-                    bg=_PALETTE["danger_bg"], fg=_PALETTE["danger_fg"], highlightbackground="#E11D48"
+                    bg=_PALETTE["danger_bg"], fg=_PALETTE["danger_fg"], highlightbackground="#F87171"
                 )
                 self.hdr_stop_btn.configure(bg=_PALETTE["danger_bg"], fg=_PALETTE["danger_fg"])
             else:
@@ -4556,9 +5238,9 @@ class DynamicIslandPill:
                     self.stop_canvas.pack_forget()
                 self.send_btn.configure(text="Send", bg=_PALETTE["cta_bg"], fg="#F2F8FF")
                 self.composer_stop_btn.configure(
-                    bg=_PALETTE["gunmetal"], fg=_PALETTE["steel"], highlightbackground="#5A667A"
+                    bg=_PALETTE["card"], fg=_PALETTE["steel"], highlightbackground=_PALETTE["border"]
                 )
-                self.hdr_stop_btn.configure(bg=_PALETTE["card_hi"], fg=_PALETTE["text"])
+                self.hdr_stop_btn.configure(bg=_PALETTE["card"], fg=_PALETTE["steel"])
         except Exception:
             pass
 
@@ -4786,10 +5468,8 @@ class DynamicIslandPill:
             return
         if self._wake_event_handle and sys.platform == "win32":
             try:
-                k32 = ctypes.WinDLL("kernel32", use_last_error=True)
-                k32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
-                k32.WaitForSingleObject.restype = wintypes.DWORD
-                if k32.WaitForSingleObject(wintypes.HANDLE(self._wake_event_handle), 0) == 0:
+                k32 = _get_win32().get("k32")
+                if k32 is not None and k32.WaitForSingleObject(wintypes.HANDLE(self._wake_event_handle), 0) == 0:
                     self.wake_and_expand(from_event=True)
             except Exception:
                 pass
@@ -4797,8 +5477,8 @@ class DynamicIslandPill:
         active = bool(self.busy or self.voice_speaking)
         hover = bool(getattr(self, "_orb_hover", False))
         self._phase += 0.24 if active else (0.15 if (self.mic_enabled or hover) else 0.10)
-        target_amp = 15.0 if active else (12.0 if self.mic_enabled else (10.6 if hover else 8.8))
-        cur_amp = getattr(self, "_wave_amp", 8.8)
+        target_amp = 13.0 if active else (10.5 if self.mic_enabled else (9.2 if hover else 7.6))
+        cur_amp = getattr(self, "_wave_amp", 7.6)
         self._wave_amp = cur_amp + (target_amp - cur_amp) * 0.25
         pulse = 0.5 + 0.5 * math.sin(self._phase)
         if active:
@@ -4810,82 +5490,83 @@ class DynamicIslandPill:
             if self.busy and self._agent_progress_pct < 88:
                 self._refresh_agent_progress(self._agent_progress_pct + 2, "Running")
 
-        if self.persona == "megatron":
-            color, ring = "#F87171", "#EF4444"
-            interval = 33 if (active or hover) else 45
-        elif self.persona == "ultron":
-            color, ring = "#93C5FD", "#38BDF8"
-            interval = 33 if (active or hover) else 45
-        elif active:
-            color, ring = "#EAF8FF", "#5CC3F2"
-            interval = 33
-        elif self.mic_enabled or hover:
-            color, ring = "#B4E1F8", "#5CC3F2"
-            interval = 36
-        elif not self.ollama_up:
+        theme = _get_persona_theme(getattr(self, "persona", "off"))
+        if not self.ollama_up and theme["key"] == "cyber_blue":
             color, ring = _PALETTE["amber"], "#F59E0B"
-            interval = 55
+            interval = 50
         else:
-            color, ring = "#5CC3F2", "#1F6FA8"
-            interval = 45
+            color = theme["bright"] if active else theme["accent"]
+            ring = theme["arc_border"] if (active or self.mic_enabled or hover) else theme["wave_mid"]
+            interval = 32 if (active or hover or self.mic_enabled) else 44
 
-        sz = int(self.orb_canvas.cget("width")) or (54 if self.expanded else 32)
-        pad = (6.0 + (2.5 * (1.0 - pulse)) if active else (8.0 - 1.4 * pulse)) * (sz / 54.0)
+        sz = int(self.orb_canvas.cget("width")) or (34 if self.expanded else 30)
+        pad = (4.0 + (2.0 * (1.0 - pulse)) if active else (5.5 - 1.0 * pulse)) * (sz / 34.0)
         self.orb_canvas.coords(self.orb_outer, pad, pad, sz - pad, sz - pad)
-        c_off = max(2.5, 4.0 * (sz / 54.0))
+        c_off = max(2.0, 3.0 * (sz / 34.0))
         mid = sz / 2.0
         self.orb_canvas.coords(self.orb_core, mid - c_off, mid - c_off, mid + c_off, mid + c_off)
         self.orb_canvas.itemconfigure(self.orb_outer, outline=ring)
         self.orb_canvas.itemconfigure(self.orb_core, fill=color)
 
-        # Render 2x-supersampled wavy multi-harmonic Ultron arc-blue filament curve
-        w = int(self.wave_canvas.cget("width")) or 172
-        h = int(self.wave_canvas.cget("height")) or 36
-        wave_bg = _PALETTE["hdr_bar"] if self.expanded else _PALETTE["gunmetal"]
-        wave_photo = _render_wave_photo(
-            w,
-            h,
-            self._phase,
-            active=active,
-            mic_enabled=self.mic_enabled,
-            persona=self.persona,
-            bg_hex=wave_bg,
-            amp_override=self._wave_amp,
-        )
-        mid_y = h / 2.0
-        amp = self._wave_amp
-        pts_main: list[float] = []
-        pts_dim: list[float] = []
-        samples = 42
-        for idx in range(samples + 1):
-            u = idx / samples
-            x = 6 + u * (w - 12)
-            env = math.sin(u * math.pi) ** 1.05
-            y1 = mid_y - amp * env * (
-                0.62 * math.sin((u * 9.0 - self._phase * 1.15) * math.pi)
-                + 0.28 * math.cos((u * 17.0 + self._phase * 1.85) * math.pi)
-                + 0.16 * math.sin((u * 25.0 - self._phase * 2.4) * math.pi)
-            )
-            y2 = mid_y + (amp * 0.72) * env * math.sin((u * 6.5 + self._phase * 0.9) * math.pi)
-            pts_main.extend((x, y1))
-            pts_dim.extend((x, y2))
-        self.wave_canvas.coords(self._fil_line_dim, *pts_dim)
-        self.wave_canvas.coords(self._fil_line_main, *pts_main)
-        cx, cy = w / 2.0, mid_y
-        gr = 5.5 + 2.5 * pulse if (active or self.mic_enabled) else 4.5
-        self.wave_canvas.coords(self._fil_glow, cx - gr, cy - gr, cx + gr, cy + gr)
-        self.wave_canvas.coords(self._fil_dot, cx - 2, cy - 2, cx + 2, cy + 2)
-        if wave_photo is not None:
-            self._img_refs["wave"] = wave_photo
-            self.wave_canvas.coords(self._wave_img_item, w / 2.0, h / 2.0)
-            self.wave_canvas.itemconfigure(self._wave_img_item, image=wave_photo, state="normal")
-            for cid in (self._fil_line_dim, self._fil_line_main, self._fil_glow, self._fil_dot):
-                self.wave_canvas.itemconfigure(cid, state="hidden")
-        else:
-            self.wave_canvas.itemconfigure(self._wave_img_item, state="hidden")
-            for cid in (self._fil_line_dim, self._fil_line_main, self._fil_glow, self._fil_dot):
-                self.wave_canvas.itemconfigure(cid, state="normal")
-            self.wave_canvas.itemconfigure(self._fil_line_main, fill="#D2EEFC" if (active or self.mic_enabled) else "#5CC3F2")
+        # Native zero-allocation Canvas oscilloscope (28 symmetrical spectrum spikes + curves)
+        if not self.expanded:
+            w = int(self.wave_canvas.cget("width")) or 98
+            h = int(self.wave_canvas.cget("height")) or 28
+            mid_y = h / 2.0
+            amp = min(mid_y - 2.0, self._wave_amp)
+            style_key = (theme["key"], active or self.mic_enabled, w, h)
+            if style_key != getattr(self, "_wave_style_key", None):
+                self._wave_style_key = style_key
+                self.wave_canvas.coords(self._wave_axis, 4, mid_y, w - 4, mid_y)
+                self.wave_canvas.itemconfigure(self._wave_axis, fill=theme["wave_glow"])
+                self.wave_canvas.itemconfigure(self._fil_line_dim, fill=theme["wave_mid"])
+                self.wave_canvas.itemconfigure(
+                    self._fil_line_main, fill=theme["wave_core"] if (active or self.mic_enabled) else theme["wave_main"]
+                )
+                self.wave_canvas.itemconfigure(self._fil_glow, outline=theme["arc_border"])
+                self.wave_canvas.itemconfigure(self._fil_dot, fill=theme["wave_core"])
+
+            bars = getattr(self, "_wave_bars", [])
+            n_bars = len(bars)
+            span_w = max(40.0, w - 10.0)
+            bar_step = span_w / max(1, n_bars)
+            half_bw = max(0.8, bar_step * 0.28)
+            for idx, bid in enumerate(bars):
+                u = (idx + 0.5) / max(1, n_bars)
+                x = 5.0 + u * span_w
+                env = math.sin(u * math.pi) ** 1.15
+                mod = abs(
+                    0.58 * math.sin((u * 8.5 - self._phase * 1.15) * math.pi)
+                    + 0.28 * math.cos((u * 17.0 + self._phase * 1.75) * math.pi)
+                    + 0.14 * math.sin((u * 23.0 - self._phase * 2.2) * math.pi)
+                )
+                bh = max(1.2, amp * env * (0.25 + 0.95 * mod))
+                self.wave_canvas.coords(bid, x - half_bw, mid_y - bh, x + half_bw, mid_y + bh)
+                if mod > 0.62 and (active or self.mic_enabled or env > 0.72):
+                    col = theme["wave_core"]
+                elif env > 0.48:
+                    col = theme["wave_main"]
+                else:
+                    col = theme["wave_mid"]
+                self.wave_canvas.itemconfigure(bid, fill=col)
+
+            pts_main: list[float] = []
+            pts_dim: list[float] = []
+            samples = 24
+            for idx in range(samples + 1):
+                u = idx / samples
+                x = 4 + u * (w - 8)
+                env = math.sin(u * math.pi) ** 1.1
+                y1 = mid_y - (amp * 0.72) * env * math.sin((u * 7.0 - self._phase * 1.1) * math.pi)
+                y2 = mid_y + (amp * 0.55) * env * math.cos((u * 11.0 + self._phase * 0.9) * math.pi)
+                pts_main.extend((x, y1))
+                pts_dim.extend((x, y2))
+            self.wave_canvas.coords(self._fil_line_dim, *pts_dim)
+            self.wave_canvas.coords(self._fil_line_main, *pts_main)
+            cx, cy = w / 2.0, mid_y
+            gr = 4.5 + 2.0 * pulse if (active or self.mic_enabled) else 3.5
+            self.wave_canvas.coords(self._fil_glow, cx - gr, cy - gr, cx + gr, cy + gr)
+            self.wave_canvas.coords(self._fil_dot, cx - 1.5, cy - 1.5, cx + 1.5, cy + 1.5)
         self.root.after(interval, self._animate_orb)
 
     def _start_hotkey_listener(self) -> None:
