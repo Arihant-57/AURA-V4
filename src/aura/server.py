@@ -1255,16 +1255,23 @@ def create_app(
             "github": "GITHUB_TOKEN",
             "custom": "AURA_CLOUD_API_KEY",
         }
+        model_env_map = {
+            "groq": "GROQ_MODEL",
+            "gemini": "GEMINI_MODEL",
+            "openrouter": "OPENROUTER_MODEL",
+            "github": "GITHUB_MODEL",
+            "custom": "AURA_CLOUD_MODEL",
+        }
         updates: dict[str, str] = {
             env_map[req.provider]: key_val,
             "AURA_CLOUD_FOR_HEAVY": "1" if req.use_for_heavy else "0",
         }
+        if req.model and req.model.strip():
+            updates[model_env_map[req.provider]] = req.model.strip()
         if req.provider == "custom":
             if not (req.base_url and req.base_url.strip()):
                 raise HTTPException(status_code=400, detail="Base URL is required for custom OpenAI-compatible API.")
             updates["AURA_CLOUD_BASE_URL"] = req.base_url.strip()
-            if req.model and req.model.strip():
-                updates["AURA_CLOUD_MODEL"] = req.model.strip()
 
         saved_path = save_env_vars(updates, env_path=session.history.root.parent / ".env")
         return {
@@ -2667,8 +2674,8 @@ _INDEX_HTML = r"""<!DOCTYPE html>
         <option value="custom">Custom OpenAI-Compatible Endpoint</option>
       </select>
       <input id="cloudKeyInput" type="password" placeholder="Paste API key once (persists across reboots, 0 idle RAM)" />
-      <input id="cloudBaseUrlInput" type="text" placeholder="Base URL (custom only, e.g. https://.../v1)" style="display:none;" />
-      <input id="cloudModelInput" type="text" placeholder="Model ID (custom only, optional)" style="display:none;" />
+      <input id="cloudBaseUrlInput" type="text" placeholder="Base URL (custom only, e.g. http://127.0.0.1:31415/v1)" style="display:none;" />
+      <input id="cloudModelInput" type="text" placeholder="Model ID (optional, e.g. gemini-3.8-flash)" />
       <label style="display:flex; align-items:center; gap:8px; font-size:12px; color:var(--muted); cursor:pointer;">
         <input id="cloudHeavyToggle" type="checkbox" />
         Auto-use Cloud for heavy multi-file tasks (auto-fallback to local if offline)
@@ -3032,7 +3039,11 @@ _INDEX_HTML = r"""<!DOCTYPE html>
         opts.push({ value: `model:${m}`, label: m });
       }
       for (const cm of cloudModels) {
-        const nice = cm.startsWith("cloud:custom/") ? `FreeLLM Gateway (${cm.slice(13)})` : cm.slice(6);
+        const nice = cm === "cloud:auto"
+          ? "Auto Failover"
+          : cm.startsWith("cloud:custom/")
+          ? `FreeLLMAPI (${cm.slice(13)})`
+          : cm.slice(6);
         opts.push({ value: `model:${cm}`, label: `Cloud · ${nice}` });
       }
       opts.push({ value: "cloud:configure", label: "Configure Free Cloud API Key..." });
@@ -3680,7 +3691,9 @@ _INDEX_HTML = r"""<!DOCTYPE html>
     cloudProviderSelect.addEventListener("change", () => {
       const isCustom = cloudProviderSelect.value === "custom";
       cloudBaseUrlInput.style.display = isCustom ? "block" : "none";
-      cloudModelInput.style.display = isCustom ? "block" : "none";
+      cloudModelInput.placeholder = isCustom
+        ? "Model ID (optional, e.g. auto)"
+        : (cloudProviderSelect.value === "gemini" ? "Model ID (default: gemini-3.8-flash)" : "Model ID (optional)");
     });
 
     document.getElementById("cloudModalCancel").addEventListener("click", () => {
@@ -3897,8 +3910,8 @@ _ISLAND_HTML = r"""<!DOCTYPE html>
           <div id="modelMenu" class="dropdown-menu" style="position:absolute; z-index:5; top:50px; left:0; width:230px; padding:6px; border-radius:18px; background:linear-gradient(180deg,#464D5A,#2E343E); border:1px solid rgba(150,165,185,0.5); box-shadow:0 22px 44px rgba(0,0,0,0.55); flex-direction:column; gap:2px">
             <div class="model-opt active" onclick="pickModel('qwen3.5:4b','qwen3.5:4b · Ollama')">qwen3.5:4b · Ollama</div>
             <div class="model-opt" onclick="pickModel('qwen2.5-coder:7b','qwen2.5-coder:7b · Ollama')">qwen2.5-coder:7b · Ollama</div>
-            <div class="model-opt" onclick="pickModel('cloud:openrouter/anthropic/claude-sonnet-4','Claude · API')">Claude · API</div>
-            <div class="model-opt" onclick="pickModel('cloud:gemini/gemini-2.5-flash','Gemini 2.5 · API')">Gemini 2.5 · API</div>
+            <div class="model-opt" onclick="pickModel('cloud:gemini/gemini-3.8-flash','Gemini 3.8 · API')">Gemini 3.8 · API</div>
+            <div class="model-opt" onclick="pickModel('cloud:custom/auto','FreeLLMAPI · Auto')">FreeLLMAPI · Auto</div>
           </div>
         </div>
         <div style="flex:none; width:1px; height:36px; background:rgba(0,0,0,0.7)"></div>

@@ -417,3 +417,25 @@ def test_push_steer_preserved_output_speech_barge_in_and_tools_popover_search():
     )
     proc = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=15)
     assert proc.returncode == 0, proc.stderr or proc.stdout
+
+
+def test_overlay_model_choices_clean_without_unconfigured_cloud():
+    from types import SimpleNamespace
+    from src.aura.overlay import DynamicIslandPill, _format_cloud_model_label
+
+    assert _format_cloud_model_label("cloud:custom/auto") == "FreeLLMAPI · Auto"
+    assert _format_cloud_model_label("cloud:gemini/gemini-3.8-flash") == "Gemini 3.8 · API"
+    assert _format_cloud_model_label("cloud:auto") == "Cloud · Auto"
+
+    fake = SimpleNamespace(
+        available_models=["qwen3.5:4b", "qwen2.5-coder:7b"],
+        available_cloud_models=["cloud:custom/auto", "cloud:gemini/gemini-3.8-flash", "cloud:auto"],
+    )
+    choices = DynamicIslandPill._collect_model_choices(fake)
+    labels = [lbl for _, lbl in choices]
+    assert "FreeLLMAPI · Auto" in labels
+    assert "Gemini 3.8 · API" in labels
+    assert "Cloud · Auto" in labels
+    assert "Claude · API" not in labels
+    assert "Gemini 2.5 · API" not in labels
+

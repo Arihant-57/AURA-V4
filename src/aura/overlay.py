@@ -128,10 +128,29 @@ _QUICK_AGENTS: tuple[tuple[str, str], ...] = (
 _DEFAULT_MODELS: tuple[tuple[str, str, str], ...] = (
     ("qwen3.5:4b", "qwen3.5:4b · Ollama", "qwen3.5:4b"),
     ("qwen2.5-coder:7b", "qwen2.5-coder:7b · Ollama", "qwen2.5-coder:7b"),
-    ("claude", "Claude · API", "cloud:openrouter/anthropic/claude-sonnet-4"),
-    ("gemini", "Gemini 2.5 · API", "cloud:gemini/gemini-2.5-flash"),
-    ("cloud_auto", "Cloud · Auto", "cloud:custom/auto"),
 )
+
+
+def _format_cloud_model_label(spec: str) -> str:
+    """Return a compact human-readable label for a cloud:* model spec."""
+    raw = str(spec or "").strip()
+    if raw == "cloud:auto":
+        return "Cloud · Auto"
+    if raw.startswith("cloud:custom/"):
+        sub = raw[len("cloud:custom/"):].strip() or "auto"
+        return "FreeLLMAPI · Auto" if sub.lower() == "auto" else f"FreeLLMAPI · {sub}"
+    if raw.startswith("cloud:gemini/"):
+        sub = raw[len("cloud:gemini/"):].strip()
+        if sub == "gemini-3.8-flash":
+            return "Gemini 3.8 · API"
+        return f"Gemini · {sub}"
+    if raw.startswith("cloud:"):
+        body = raw[6:]
+        if "/" in body:
+            prov, mdl = body.split("/", 1)
+            return f"{prov.title()} · {mdl}"
+        return f"Cloud · {body}"
+    return raw
 
 
 def enable_high_dpi_awareness() -> bool:
@@ -947,7 +966,7 @@ class DynamicIslandPill:
         self.selected_agent = "auto"
         self.active_model_name = "qwen3.5:4b"
         self.available_models: list[str] = ["qwen3.5:4b", "qwen2.5-coder:7b", "qwen3.5:9b"]
-        self.available_cloud_models: list[str] = ["cloud:custom/auto"]
+        self.available_cloud_models: list[str] = []
         self.available_tools: list[dict[str, str]] = []
         self.active_tab = "chat"
         self._agent_cards: dict[str, tuple[tk.Frame, tk.Label, tk.Label]] = {}
@@ -1432,16 +1451,17 @@ class DynamicIslandPill:
         for m in self.available_models:
             seen.add(m)
             choices.append((m, f"{m} · Ollama" if ":" in m else m))
-        for _key, label, spec in _DEFAULT_MODELS:
-            if spec in seen:
-                continue
-            seen.add(spec)
-            choices.append((spec, label))
+        if not choices:
+            for _key, label, spec in _DEFAULT_MODELS:
+                if spec in seen:
+                    continue
+                seen.add(spec)
+                choices.append((spec, label))
         for cm in self.available_cloud_models:
             if cm in seen:
                 continue
             seen.add(cm)
-            choices.append((cm, cm))
+            choices.append((cm, _format_cloud_model_label(cm)))
         return choices
 
     def _populate_model_popover(self) -> None:
@@ -4038,7 +4058,12 @@ class DynamicIslandPill:
             pass
 
     def _update_header(self) -> None:
-        short_m = self.active_model_name if len(self.active_model_name) <= 15 else f"{self.active_model_name[:14]}…"
+        disp_m = (
+            _format_cloud_model_label(self.active_model_name)
+            if str(self.active_model_name).startswith("cloud:")
+            else self.active_model_name
+        )
+        short_m = disp_m if len(disp_m) <= 18 else f"{disp_m[:17]}…"
         self.model_btn.configure(text=f"◈ {short_m} ▾")
 
         status_txt = self.state_label
@@ -4112,7 +4137,7 @@ class DynamicIslandPill:
             self.ollama_up = bool(st["ollama_up"])
         if st.get("available_models"):
             self.available_models = [str(m) for m in st["available_models"]]
-        if st.get("available_cloud_models"):
+        if isinstance(st.get("available_cloud_models"), list):
             self.available_cloud_models = [str(m) for m in st["available_cloud_models"]]
         if isinstance(st.get("available_tools"), list):
             parsed_tools = [

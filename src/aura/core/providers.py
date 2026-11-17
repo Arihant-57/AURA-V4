@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+from pathlib import Path
 import shutil
 import subprocess
 import sys
@@ -22,6 +23,15 @@ import httpx
 import ollama
 from ollama import chat
 from ollama import ChatResponse, Message
+
+
+class CloudToolCall(Message.ToolCall):
+    """ToolCall preserving OpenAI/Google metadata (id, thought_signature, extra_content) across turns."""
+
+    id: str | None = None
+    extra_content: dict[str, Any] | None = None
+    thought_signature: str | None = None
+    provider_specific_fields: dict[str, Any] | None = None
 
 
 def get_ollama_base_url() -> str:
@@ -291,21 +301,31 @@ CLOUD_PRESETS: dict[str, dict[str, Any]] = {
     "groq": {
         "base_url": "https://api.groq.com/openai/v1",
         "default_model": "llama-3.3-70b-versatile",
+        "model_envs": ("GROQ_MODEL",),
         "key_envs": ("GROQ_API_KEY",),
     },
     "gemini": {
         "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
-        "default_model": "gemini-2.5-flash",
+        "default_model": "gemini-3.8-flash",
+        "model_envs": ("GEMINI_MODEL", "AURA_GEMINI_MODEL"),
+        "fallback_models": (
+            "gemini-3.8-flash",
+            "gemini-3.6-flash",
+            "gemini-3.5-flash",
+            "gemini-3-flash-preview",
+        ),
         "key_envs": ("GEMINI_API_KEY", "GEMINIAPI_KEY", "GOOGLE_API_KEY"),
     },
     "openrouter": {
         "base_url": "https://openrouter.ai/api/v1",
         "default_model": "qwen/qwen3-coder:free",
+        "model_envs": ("OPENROUTER_MODEL",),
         "key_envs": ("OPENROUTER_API_KEY",),
     },
     "github": {
         "base_url": "https://models.inference.ai.azure.com",
         "default_model": "gpt-4o-mini",
+        "model_envs": ("GITHUB_MODEL",),
         "key_envs": ("GITHUB_TOKEN",),
     },
 }
@@ -317,6 +337,81 @@ def _first_env(*names: str) -> str:
         if val:
             return val
     return ""
+
+
+def _preset_default_model(name: str) -> str:
+    cfg = CLOUD_PRESETS[name]
+    model_envs = cfg.get("model_envs") or ()
+    return _first_env(*model_envs) or str(cfg["default_model"])
+
+
+def _is_freellmapi_url(base_url: str) -> bool:
+    parsed = urlparse((base_url or "").strip())
+    host = (parsed.hostname or "").strip().lower()
+    return host in {"127.0.0.1", "localhost", "::1"} and parsed.port == 31415
+
+
+def is_freellmapi_running(base_url: str, timeout: float = 0.8) -> bool:
+    """Return True if local FreeLLMAPI gateway responds on /models."""
+    url = (base_url or "").strip().rstrip("/")
+    if not url:
+        return False
+    if url.lower().endswith("/chat/completions"):
+        url = url[: -len("/chat/completions")].rstrip("/")
+    try:
+        resp = httpx.get(f"{url}/models", timeout=timeout)
+        return resp.status_code < 500
+    except Exception:
+        return False
+
+
+def ensure_freellmapi_running(base_url: str, timeout: float = 8.0) -> bool:
+    """Launch FreeLLMAPI desktop gateway on demand when configured on localhost:31415."""
+    if not _is_freellmapi_url(base_url):
+        return False
+    if is_freellmapi_running(base_url, timeout=0.8):
+        return True
+    if os.environ.get("AURA_NO_AUTO_FREELMAPI") == "1" or os.environ.get("PYTEST_CURRENT_TEST"):
+        return False
+
+    candidates: list[Path] = []
+    env_exe = os.environ.get("FREELLMAPI_EXE", "").strip()
+    if env_exe:
+        candidates.append(Path(env_exe).expanduser())
+    candidates.extend([
+        Path.home() / "AppData" / "Local" / "Programs" / "freellmapi-desktop" / "FreeLLMAPI.exe",
+    ])
+    which_exe = shutil.which("FreeLLMAPI") or shutil.which("freellmapi")
+    if which_exe:
+        candidates.append(Path(which_exe))
+
+    exe_path = next((p for p in candidates if p.is_file()), None)
+    if exe_path is None:
+        return False
+
+    from .mcp_hub import win32_subprocess_kwargs
+
+    kwargs: dict[str, Any] = {
+        "stdin": subprocess.DEVNULL,
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
+    }
+    if sys.platform == "win32":
+        kwargs.update(win32_subprocess_kwargs(detached=True, hide_window=True))
+    else:
+        kwargs["start_new_session"] = True
+
+    try:
+        subprocess.Popen([str(exe_path)], **kwargs)
+    except Exception:
+        return False
+
+    deadline = time.monotonic() + max(1.0, float(timeout))
+    while time.monotonic() < deadline:
+        if is_freellmapi_running(base_url, timeout=0.8):
+            return True
+        time.sleep(0.35)
+    return is_freellmapi_running(base_url, timeout=0.8)
 
 
 def is_cloud_model_spec(model: str | None) -> bool:
@@ -384,8 +479,12 @@ def resolve_cloud_candidates(spec: str | None = None) -> list[tuple[str, str, st
             if not key and explicit_preset == name:
                 key = _first_env("AURA_CLOUD_API_KEY", "FREELLMAPI_KEY")
             if key:
-                mdl = (model_override if explicit_preset == name else "") or cfg["default_model"]
+                mdl = (model_override if explicit_preset == name else "") or _preset_default_model(name)
                 candidates.append((name, cfg["base_url"], key, mdl))
+                if explicit_preset == name:
+                    for fb_mdl in cfg.get("fallback_models") or ():
+                        if fb_mdl != mdl:
+                            candidates.append((name, cfg["base_url"], key, str(fb_mdl)))
     return candidates
 
 
@@ -422,7 +521,7 @@ def resolve_cloud_target(spec: str | None = None) -> tuple[str, str, str, str]:
             preset,
             cfg["base_url"],
             _first_env(*cfg["key_envs"], "AURA_CLOUD_API_KEY", "FREELLMAPI_KEY"),
-            model_override or cfg["default_model"],
+            model_override or _preset_default_model(preset),
         )
 
     custom_url = _first_env("AURA_CLOUD_BASE_URL", "FREELLMAPI_ENDPOINT", "OPENAI_BASE_URL")
@@ -451,20 +550,27 @@ def _to_openai_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
             openai_calls = []
             pending_tool_ids = []
             for tc in msg["tool_calls"]:
-                func = tc.get("function") if isinstance(tc, dict) else getattr(tc, "function", None)
+                is_dict = isinstance(tc, dict)
+                func = tc.get("function") if is_dict else getattr(tc, "function", None)
                 if not func:
                     continue
                 name = func.get("name") if isinstance(func, dict) else getattr(func, "name", "")
                 args = func.get("arguments", {}) if isinstance(func, dict) else getattr(func, "arguments", {})
                 args_str = args if isinstance(args, str) else json.dumps(args or {})
                 call_seq += 1
-                tc_id = (tc.get("id") if isinstance(tc, dict) else None) or f"call_{call_seq}"
+                raw_id = tc.get("id") if is_dict else getattr(tc, "id", None)
+                tc_id = str(raw_id) if raw_id else f"call_{call_seq}"
                 pending_tool_ids.append(tc_id)
-                openai_calls.append({
+                call_entry: dict[str, Any] = {
                     "id": tc_id,
                     "type": "function",
                     "function": {"name": str(name), "arguments": args_str},
-                })
+                }
+                for meta_key in ("extra_content", "thought_signature", "provider_specific_fields"):
+                    meta_val = tc.get(meta_key) if is_dict else getattr(tc, meta_key, None)
+                    if meta_val is not None:
+                        call_entry[meta_key] = meta_val
+                openai_calls.append(call_entry)
             entry: dict[str, Any] = {"role": "assistant", "content": content or None}
             if openai_calls:
                 entry["tool_calls"] = openai_calls
@@ -550,18 +656,24 @@ class CloudProvider:
         oai_messages = _to_openai_messages(messages)
         candidates = list(self._candidates) or [(self.preset, self.base_url, self.api_key, self.api_model)]
         start_idx = min(self._active_idx, len(candidates) - 1)
+        safe_max_tokens = min(max(1, int(opts.num_predict or 1536)), 8192)
 
         data: dict[str, Any] | None = None
         last_exc: Exception | None = None
 
-        for idx in range(start_idx, len(candidates)):
+        idx = start_idx
+        gemini_fb_injected = False
+        while idx < len(candidates):
             preset, base_url, api_key, api_model = candidates[idx]
+            if _is_freellmapi_url(base_url) and not is_freellmapi_running(base_url, timeout=0.6):
+                await asyncio.to_thread(ensure_freellmapi_running, base_url, 8.0)
+
             payload: dict[str, Any] = {
                 "model": api_model,
                 "messages": oai_messages,
                 "temperature": opts.temperature,
                 "top_p": opts.top_p,
-                "max_tokens": opts.num_predict,
+                "max_tokens": safe_max_tokens,
             }
             if tools:
                 payload["tools"] = tools
@@ -572,46 +684,111 @@ class CloudProvider:
             }
             url = f"{base_url.rstrip('/')}/chat/completions"
 
+            def _maybe_inject_gemini_fallback() -> None:
+                nonlocal gemini_fb_injected
+                if (
+                    not gemini_fb_injected
+                    and idx + 1 >= len(candidates)
+                    and preset == "gemini"
+                    and api_model != "gemini-3.6-flash"
+                ):
+                    gemini_fb_injected = True
+                    candidates.append(("gemini", base_url, api_key, "gemini-3.6-flash"))
+
+            has_fallback = (idx + 1 < len(candidates)) or (
+                not gemini_fb_injected and preset == "gemini" and api_model != "gemini-3.6-flash"
+            )
+            fb_cap = 55.0 if _is_freellmapi_url(base_url) else 25.0
+            req_timeout: Any = (
+                httpx.Timeout(min(float(self.timeout), fb_cap), connect=6.0)
+                if has_fallback
+                else self.timeout
+            )
+
             try:
-                async with httpx.AsyncClient(timeout=self.timeout) as client:
+                async with httpx.AsyncClient(timeout=req_timeout) as client:
                     resp = await client.post(url, json=payload, headers=headers)
             except httpx.TimeoutException as exc:
                 last_exc = TimeoutError(f"Cloud API request timed out after {self.timeout}s: {exc}")
+                _maybe_inject_gemini_fallback()
                 if idx + 1 < len(candidates):
                     self.failover_events.append(f"{preset}->timeout")
-                    self._activate_candidate(idx + 1)
+                    if idx + 1 < len(self._candidates):
+                        self._activate_candidate(idx + 1)
+                    idx += 1
                     continue
                 raise last_exc from exc
             except (httpx.ConnectError, httpx.NetworkError) as exc:
-                last_exc = ConnectionError(f"Cannot connect to cloud LLM API ({base_url}): {exc}")
-                if idx + 1 < len(candidates):
-                    self.failover_events.append(f"{preset}->connect_error")
-                    self._activate_candidate(idx + 1)
-                    continue
-                raise last_exc from exc
+                if _is_freellmapi_url(base_url) and await asyncio.to_thread(ensure_freellmapi_running, base_url, 8.0):
+                    try:
+                        async with httpx.AsyncClient(timeout=self.timeout) as client:
+                            resp = await client.post(url, json=payload, headers=headers)
+                    except Exception:
+                        resp = None
+                else:
+                    resp = None
+                if resp is None:
+                    hint = (
+                        " (ensure FreeLLMAPI desktop is running on port 31415)"
+                        if _is_freellmapi_url(base_url)
+                        else ""
+                    )
+                    last_exc = ConnectionError(f"Cannot connect to cloud LLM API ({base_url}){hint}: {exc}")
+                    _maybe_inject_gemini_fallback()
+                    if idx + 1 < len(candidates):
+                        self.failover_events.append(f"{preset}->connect_error")
+                        if idx + 1 < len(self._candidates):
+                            self._activate_candidate(idx + 1)
+                        idx += 1
+                        continue
+                    raise last_exc from exc
 
-            if resp.status_code == 429 or resp.status_code >= 500:
-                last_exc = (
-                    TimeoutError(f"Cloud API rate limit reached (429) for 'cloud:{preset}/{api_model}'.")
-                    if resp.status_code == 429
-                    else RuntimeError(f"Cloud API error ({resp.status_code}): {resp.text[:240]}")
-                )
+            if resp.status_code in (404, 413, 429) or resp.status_code >= 500:
+                if resp.status_code == 429:
+                    last_exc = TimeoutError(f"Cloud API rate limit reached (429) for 'cloud:{preset}/{api_model}'.")
+                elif resp.status_code == 404:
+                    last_exc = ValueError(
+                        f"Cloud API rejected request (404) for 'cloud:{preset}/{api_model}': {resp.text[:200]}"
+                    )
+                else:
+                    last_exc = RuntimeError(f"Cloud API error ({resp.status_code}): {resp.text[:240]}")
+                _maybe_inject_gemini_fallback()
                 if idx + 1 < len(candidates):
                     self.failover_events.append(f"{preset}->{resp.status_code}")
-                    self._activate_candidate(idx + 1)
+                    if idx + 1 < len(self._candidates):
+                        self._activate_candidate(idx + 1)
+                    idx += 1
                     continue
                 raise last_exc
 
-            if resp.status_code in (401, 403, 404):
+            if resp.status_code in (401, 403):
                 raise ValueError(
                     f"Cloud API rejected request ({resp.status_code}) for 'cloud:{preset}/{api_model}': {resp.text[:200]}"
                 )
             if resp.status_code >= 400:
                 raise RuntimeError(f"Cloud API error ({resp.status_code}): {resp.text[:240]}")
 
-            data = resp.json()
+            parsed_data = resp.json()
+            cand_choices = parsed_data.get("choices") or []
+            cand_msg = (cand_choices[0].get("message") or {}) if cand_choices else {}
+            if not cand_choices or (not (cand_msg.get("content") or "").strip() and not (cand_msg.get("tool_calls") or [])):
+                _maybe_inject_gemini_fallback()
+                if idx + 1 < len(candidates):
+                    self.failover_events.append(f"{preset}->empty")
+                    if idx + 1 < len(self._candidates):
+                        self._activate_candidate(idx + 1)
+                    idx += 1
+                    continue
+
+            data = parsed_data
             if idx != self._active_idx and idx < len(self._candidates):
                 self._activate_candidate(idx)
+            elif idx != self._active_idx:
+                self.preset = preset
+                self.base_url = base_url.strip().rstrip("/")
+                self.api_key = api_key
+                self.api_model = api_model
+                self.model = f"cloud:{preset}/{api_model}"
             break
 
         assert data is not None  # guaranteed if loop exited via break
@@ -637,7 +814,13 @@ class CloudProvider:
                 args_dict = {}
             if name:
                 parsed_calls.append(
-                    Message.ToolCall(function=Message.ToolCall.Function(name=name, arguments=args_dict))
+                    CloudToolCall(
+                        id=(str(tc["id"]) if tc.get("id") else None),
+                        extra_content=tc.get("extra_content"),
+                        thought_signature=tc.get("thought_signature"),
+                        provider_specific_fields=tc.get("provider_specific_fields"),
+                        function=Message.ToolCall.Function(name=name, arguments=args_dict),
+                    )
                 )
 
         usage = data.get("usage") or {}
@@ -738,7 +921,9 @@ class ProviderFactory:
             found.append(f"cloud:custom/{c_model}")
         for name, cfg in CLOUD_PRESETS.items():
             if _first_env(*cfg["key_envs"]):
-                found.append(f"cloud:{name}/{cfg['default_model']}")
+                found.append(f"cloud:{name}/{_preset_default_model(name)}")
+        if len(found) > 1 and "cloud:auto" not in found:
+            found.append("cloud:auto")
         return found
 
     @classmethod

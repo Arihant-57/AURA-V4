@@ -152,6 +152,17 @@ async def execute_tool_call(
     return sanitized, meta
 
 
+def _extract_tool_call_meta(tc: Any) -> dict[str, Any]:
+    """Extract optional OpenAI/Gemini tool-call metadata (id, thought_signature, extra_content)."""
+    meta: dict[str, Any] = {}
+    is_dict = isinstance(tc, dict)
+    for key in ("id", "extra_content", "thought_signature", "provider_specific_fields"):
+        val = tc.get(key) if is_dict else getattr(tc, key, None)
+        if val is not None:
+            meta[key] = val
+    return meta
+
+
 def _serialize_tool_calls(tool_calls: list) -> list[dict]:
     """Convert Ollama ToolCall objects to plain dicts for message history.
 
@@ -172,9 +183,9 @@ def _serialize_tool_calls(tool_calls: list) -> list[dict]:
                 args = {}
         elif not isinstance(args, dict):
             args = {}
-        serialized.append({
-            "function": {"name": str(name), "arguments": args}
-        })
+        entry: dict[str, Any] = {"function": {"name": str(name), "arguments": args}}
+        entry.update(_extract_tool_call_meta(tc))
+        serialized.append(entry)
     return serialized
 
 
@@ -892,6 +903,7 @@ async def run_agent_loop(
         content = msg.content or ""
         has_tool_calls = bool(msg.tool_calls and len(msg.tool_calls) > 0)
         tool_calls: list[tuple[str, dict]] = []
+        raw_tc_meta_by_sig: dict[tuple[str, str], list[dict[str, Any]]] = {}
 
         if has_tool_calls:
             for tc in msg.tool_calls:
@@ -908,7 +920,13 @@ async def run_agent_loop(
                 elif not isinstance(args, dict):
                     args = {}
                 if name:
-                    tool_calls.append((str(name), args))
+                    tc_name = str(name)
+                    tool_calls.append((tc_name, args))
+                    norm_a = normalize_tool_arguments(tc_name, args if isinstance(args, dict) else {})
+                    sig_key = (tc_name, json.dumps(norm_a, sort_keys=True))
+                    tc_meta = _extract_tool_call_meta(tc)
+                    if tc_meta:
+                        raw_tc_meta_by_sig.setdefault(sig_key, []).append(tc_meta)
             tool_calls = _deduplicate_tool_calls(tool_calls)
         elif settings.agent.allow_text_tool_fallback:
             fallback_calls = _parse_text_tool_calls(content, active_tool_names)
@@ -916,10 +934,22 @@ async def run_agent_loop(
                 tool_calls = _deduplicate_tool_calls(fallback_calls)
                 has_tool_calls = True
 
-        # Append assistant message with clean serialization
+        # Append assistant message with clean serialization (preserving cloud id/thought_signature metadata)
         assistant_msg: dict[str, Any] = {"role": "assistant", "content": content}
+        call_id_by_sig: dict[tuple[str, str], str] = {}
         if has_tool_calls and tool_calls:
-            assistant_msg["tool_calls"] = [{"function": {"name": n, "arguments": a}} for n, a in tool_calls]
+            serialized_calls: list[dict[str, Any]] = []
+            for n, a in tool_calls:
+                entry: dict[str, Any] = {"function": {"name": n, "arguments": a}}
+                sig_key = (n, json.dumps(a, sort_keys=True))
+                meta_queue = raw_tc_meta_by_sig.get(sig_key)
+                if meta_queue:
+                    tc_meta = meta_queue.pop(0)
+                    entry.update(tc_meta)
+                    if tc_meta.get("id"):
+                        call_id_by_sig[sig_key] = str(tc_meta["id"])
+                serialized_calls.append(entry)
+            assistant_msg["tool_calls"] = serialized_calls
             if content.strip():
                 last_partial_output = content.strip()
                 await _emit_loop_event(on_event, event="partial", text=last_partial_output)
@@ -1043,11 +1073,14 @@ async def run_agent_loop(
                         message=f"{task_state.stage.value}: {name} blocked (loop guard)",
                     )
                     executed_calls.add(sig)
-                    messages.append({
+                    tool_msg: dict[str, Any] = {
                         "role": "tool",
                         "name": name,
                         "content": res_text,
-                    })
+                    }
+                    if sig in call_id_by_sig:
+                        tool_msg["tool_call_id"] = call_id_by_sig[sig]
+                    messages.append(tool_msg)
                     turn_has_exec_error = True
                     last_turn_error = res_text
                     turn_outcomes.append(None)
@@ -1089,11 +1122,14 @@ async def run_agent_loop(
                     message=f"{task_state.stage.value}: {name} {'failed' if meta.get('error') else 'done'}",
                 )
                 executed_calls.add(sig)
-                messages.append({
+                tool_msg = {
                     "role": "tool",
                     "name": name,
                     "content": res_text,
-                })
+                }
+                if sig in call_id_by_sig:
+                    tool_msg["tool_call_id"] = call_id_by_sig[sig]
+                messages.append(tool_msg)
 
                 outcome = _classify_terminal_tool_outcome(res_text)
                 turn_outcomes.append(outcome)

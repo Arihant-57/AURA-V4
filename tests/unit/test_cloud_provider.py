@@ -178,3 +178,100 @@ async def test_cloud_auto_fails_over_from_gemini_429_to_freellm(monkeypatch):
     assert "gemini->429" in provider.failover_events
     assert client_inst.post.call_count == 2
 
+
+@pytest.mark.asyncio
+async def test_gemini_default_38_flash_and_503_failover_to_36_flash(monkeypatch):
+    for k in ("GROQ_API_KEY", "OPENROUTER_API_KEY", "GITHUB_TOKEN", "AURA_CLOUD_API_KEY", "AURA_CLOUD_BASE_URL", "FREELLMAPI_ENDPOINT", "FREELLMAPI_KEY", "GEMINI_MODEL", "AURA_GEMINI_MODEL"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("GEMINI_API_KEY", "gm_key")
+
+    with patch("src.aura.config.settings.load_aura_env", return_value=None):
+        avail = ProviderFactory.available_cloud_models()
+        assert avail == ["cloud:gemini/gemini-3.8-flash"]
+
+        monkeypatch.setenv("GEMINI_MODEL", "gemini-3.8-flash-custom")
+        assert ProviderFactory.available_cloud_models() == ["cloud:gemini/gemini-3.8-flash-custom"]
+        monkeypatch.delenv("GEMINI_MODEL", raising=False)
+
+        provider = CloudProvider("cloud:gemini")
+    assert provider.api_model == "gemini-3.8-flash"
+
+    resp_503 = MagicMock(status_code=503, text="high demand")
+    resp_ok = MagicMock(status_code=200)
+    resp_ok.json.return_value = {"choices": [{"message": {"content": "gemini 3.6 ok"}}]}
+
+    with patch("src.aura.core.providers.httpx.AsyncClient") as mock_client_cls:
+        client_inst = AsyncMock()
+        client_inst.post.side_effect = [resp_503, resp_ok]
+        mock_client_cls.return_value.__aenter__.return_value = client_inst
+
+        out = await provider.chat([{"role": "user", "content": "hi"}])
+
+    assert out.message.content == "gemini 3.6 ok"
+    assert provider.api_model == "gemini-3.6-flash"
+    assert "gemini->503" in provider.failover_events
+    assert client_inst.post.call_args_list[1].kwargs["json"]["model"] == "gemini-3.6-flash"
+
+
+@pytest.mark.asyncio
+async def test_gemini_thought_signature_preserved_across_agent_loop_turns(tmp_path: Path):
+    from mcp.types import TextContent, Tool
+    from src.aura.agents.loop import run_agent_loop
+    from src.aura.core import McpHub, ResultCache, SessionMemory
+    from src.aura.core.providers import CloudToolCall
+    from ollama import ChatResponse, Message
+
+    provider = CloudProvider("cloud:gemini/gemini-3.8-flash", api_key="gm_key", auto_failover=False)
+
+    resp1 = MagicMock(status_code=200)
+    resp1.json.return_value = {
+        "choices": [{
+            "message": {
+                "content": "",
+                "tool_calls": [{
+                    "id": "call_gem_1",
+                    "type": "function",
+                    "extra_content": {"google": {"thought_signature": "sig_token_xyz"}},
+                    "function": {"name": "list_dir", "arguments": '{"path": "."}'},
+                }],
+            }
+        }],
+        "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+    }
+    resp2 = MagicMock(status_code=200)
+    resp2.json.return_value = {
+        "choices": [{"message": {"content": "Directory listed cleanly."}}],
+        "usage": {"prompt_tokens": 20, "completion_tokens": 6},
+    }
+
+    hub = MagicMock(spec=McpHub)
+    hub.read_only = True
+    hub.workspace = tmp_path
+    hub.broken = set()
+    hub.tools = {
+        "list_dir": Tool(
+            name="list_dir",
+            description="List dir",
+            inputSchema={"type": "object", "properties": {"path": {"type": "string"}}},
+        )
+    }
+    hub.tool_schemas = {"list_dir": {"type": "object", "properties": {"path": {"type": "string"}}}}
+    hub.tool_clients = {"list_dir": object()}
+    hub.call_tool = AsyncMock(return_value=MagicMock(content=[TextContent(type="text", text="README.md")], is_error=False))
+
+    with patch("src.aura.core.providers.httpx.AsyncClient") as mock_client_cls:
+        client_inst = AsyncMock()
+        client_inst.post.side_effect = [resp1, resp2]
+        mock_client_cls.return_value.__aenter__.return_value = client_inst
+
+        ans = await run_agent_loop("list dir", provider, hub, SessionMemory(), ResultCache(ttl_seconds=60))
+
+    assert ans == "Directory listed cleanly."
+    second_msgs = client_inst.post.call_args_list[1].kwargs["json"]["messages"]
+    asst_msgs = [m for m in second_msgs if m.get("role") == "assistant" and m.get("tool_calls")]
+    tool_msgs = [m for m in second_msgs if m.get("role") == "tool"]
+    assert asst_msgs[-1]["tool_calls"][0]["id"] == "call_gem_1"
+    assert asst_msgs[-1]["tool_calls"][0]["extra_content"] == {"google": {"thought_signature": "sig_token_xyz"}}
+    assert tool_msgs[-1]["tool_call_id"] == "call_gem_1"
+
+
