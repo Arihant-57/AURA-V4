@@ -1586,7 +1586,10 @@ def read_screen_ocr_impl(target: str = "") -> str:
                 uia_text = ui_see_impl(target)
                 if not uia_text.startswith(("ERROR:", "NOT FOUND:")):
                     return f"[OCR unavailable ({exc}); UI Automation text for {label}]\n{uia_text}"
-            return f"ERROR: Screen capture unavailable ({exc}). Unlock desktop or run in an interactive Windows session."
+            return (
+                f"ERROR: Screen capture unavailable ({exc}). Unlock desktop or run in an interactive Windows session. "
+                "HINT: Use desktop_ui_see(target='<window name e.g. Notepad>') to read text inside an open window directly via UI Automation."
+            )
         try:
             img.save(tmp_path)
         finally:
@@ -2108,7 +2111,7 @@ def desktop_trash_file(path: str) -> str:
 
 @mcp.tool()
 def desktop_ui_see(target: str, max_items: int = 60) -> str:
-    """List buttons, tabs, menus, and fields inside an open window via Windows UI Automation."""
+    """Read visible document/editor text (e.g. Notepad, VS Code code) and list controls inside an open window via Windows UI Automation."""
     return ui_see_impl(target, max_items=max_items)
 
 
