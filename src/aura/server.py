@@ -3801,10 +3801,10 @@ _ISLAND_HTML = r"""<!DOCTYPE html>
     --accent: #38BDF8;
     --accent-glow: rgba(56, 189, 248, 0.42);
     --accent-soft: rgba(56, 189, 248, 0.16);
-    --glass-bg: rgba(11, 19, 32, 0.58);
-    --glass-well: rgba(8, 15, 26, 0.48);
-    --glass-card: rgba(15, 26, 44, 0.52);
-    --glass-border: rgba(125, 211, 252, 0.24);
+    --glass-bg: rgba(18, 20, 24, 0.54);
+    --glass-well: rgba(14, 15, 18, 0.44);
+    --glass-card: rgba(24, 27, 32, 0.52);
+    --glass-border: rgba(255, 255, 255, 0.14);
   }
   body[data-persona="ultron"] {
     --accent: #F59E0B;
@@ -3822,15 +3822,15 @@ _ISLAND_HTML = r"""<!DOCTYPE html>
   html, body {
     margin: 0; padding: 0; min-height: 100vh;
     background:
-      radial-gradient(680px 440px at 36% 46%, rgba(56, 189, 248, 0.26), transparent 68%),
-      radial-gradient(560px 400px at 56% 52%, rgba(139, 92, 246, 0.24), transparent 66%),
-      radial-gradient(520px 360px at 46% 32%, rgba(16, 185, 129, 0.20), transparent 68%),
-      radial-gradient(900px 540px at 14% 18%, rgba(14, 116, 144, 0.28), transparent 72%),
-      radial-gradient(880px 520px at 88% 82%, rgba(30, 64, 175, 0.26), transparent 72%),
-      linear-gradient(155deg, #050912 0%, #091322 48%, #060B14 100%);
+      radial-gradient(680px 440px at 36% 46%, rgba(56, 189, 248, 0.22), transparent 68%),
+      radial-gradient(560px 400px at 56% 52%, rgba(139, 92, 246, 0.20), transparent 66%),
+      radial-gradient(520px 360px at 46% 32%, rgba(16, 185, 129, 0.18), transparent 68%),
+      radial-gradient(900px 540px at 14% 18%, rgba(39, 39, 42, 0.45), transparent 72%),
+      radial-gradient(880px 520px at 88% 82%, rgba(24, 24, 27, 0.45), transparent 72%),
+      linear-gradient(155deg, #090A0D 0%, #111318 48%, #0A0B0E 100%);
     background-attachment: fixed;
     font-family: 'Inter', 'Manrope', system-ui, sans-serif;
-    color: #E8F0FA;
+    color: #F3F5F8;
     -webkit-font-smoothing: antialiased;
     overflow-x: hidden;
   }
@@ -3979,10 +3979,11 @@ _ISLAND_HTML = r"""<!DOCTYPE html>
     color: #F8FAFC; font-weight: 600; border-radius: 10px;
   }
   .pill-btn-steel {
-    border: 1px solid rgba(148, 163, 184, 0.28);
-    background: rgba(15, 25, 42, 0.65);
-    backdrop-filter: blur(12px);
-    color: #DCE6F2; border-radius: 9px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: rgba(26, 28, 34, 0.62);
+    backdrop-filter: blur(14px);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    color: #E2E8F0; border-radius: 9px;
   }
   .pill-btn-danger {
     border: 1px solid rgba(239, 68, 68, 0.7);
@@ -3992,12 +3993,12 @@ _ISLAND_HTML = r"""<!DOCTYPE html>
   /* Upward & Corner Glass Popovers (Photos 1 & 3) */
   .popover-card {
     display: none; position: absolute; z-index: 40;
-    background: rgba(13, 21, 35, 0.88);
-    backdrop-filter: blur(26px) saturate(190%);
-    -webkit-backdrop-filter: blur(26px) saturate(190%);
-    border: 1px solid rgba(148, 163, 184, 0.32);
+    background: rgba(22, 24, 29, 0.82);
+    backdrop-filter: blur(28px) saturate(185%);
+    -webkit-backdrop-filter: blur(28px) saturate(185%);
+    border: 1px solid rgba(255, 255, 255, 0.16);
     border-radius: 12px; padding: 6px;
-    box-shadow: 0 18px 42px rgba(0, 0, 0, 0.65);
+    box-shadow: 0 18px 42px rgba(0, 0, 0, 0.68), inset 0 1px 0 rgba(255, 255, 255, 0.12);
     flex-direction: column; gap: 2px;
   }
   .popover-card.open { display: flex; }
@@ -4147,7 +4148,7 @@ _ISLAND_HTML = r"""<!DOCTYPE html>
         </div>
 
         <!-- PHOTO 3: Top-Right Floating Apps Connector Popover (id="appsPanel") -->
-        <div id="appsPanel" style="display:none; position:absolute; top:46px; right:4px; z-index:50; width:275px; padding:14px; border-radius:14px; background:rgba(13,22,36,0.92); backdrop-filter:blur(28px) saturate(190%); border:1px solid rgba(148,163,184,0.34); box-shadow:0 24px 54px rgba(0,0,0,0.75); flex-direction:column; gap:11px">
+        <div id="appsPanel" style="display:none; position:absolute; top:46px; right:4px; z-index:50; width:275px; padding:14px; border-radius:14px; background:rgba(22,24,29,0.86); backdrop-filter:blur(30px) saturate(185%); border:1px solid rgba(255,255,255,0.16); box-shadow:0 24px 54px rgba(0,0,0,0.75), inset 0 1px 0 rgba(255,255,255,0.12); flex-direction:column; gap:11px">
           <div style="display:flex; align-items:center; justify-content:space-between">
             <div style="display:flex; align-items:center; gap:8px; font-size:13px; font-weight:500; color:#F1F5F9">
               <span style="color:#EF4444; font-weight:700">M</span> Gmail <span id="islGmailState" style="font-size:11px; color:#94A3B8">(On)</span>
@@ -4214,7 +4215,7 @@ _ISLAND_HTML = r"""<!DOCTYPE html>
           </div>
 
           <!-- Bottom Omni Composer with Upward Popovers (Photos 1 & 3) -->
-          <div style="position:relative; display:flex; flex-direction:column; gap:10px; padding:11px 14px; border-radius:14px; background:rgba(9, 16, 28, 0.66); border:1px solid rgba(148, 163, 184, 0.25)">
+          <div style="position:relative; display:flex; flex-direction:column; gap:10px; padding:11px 14px; border-radius:14px; background:rgba(20, 22, 27, 0.62); border:1px solid rgba(255, 255, 255, 0.14); box-shadow:inset 0 1px 0 rgba(255,255,255,0.08)">
             <!-- Upward Model Popover -->
             <div id="modelMenu" class="popover-card" style="bottom:86px; right:215px; width:215px">
               <button class="pop-item active" onclick="pickModel('qwen3.5:4b','qwen3.5:4b')">qwen3.5:4b · Ollama</button>

@@ -142,36 +142,40 @@ _MONO_FONT = "Cascadia Code" if sys.platform == "win32" else "Consolas"
 
 _PALETTE = {
     "chroma": "#010203",
-    "bg": "#0E1520",
-    "titanium": "#223145",
-    "gunmetal": "#0B111A",
-    "panel_mid": "#131D2B",
-    "card": "#162233",
-    "card_hi": "#1D2C41",
-    "well": "#0E1622",
-    "well_lo": "#101A28",
-    "hdr_bar": "#111A27",
-    "code_bg": "#0A1018",
-    "chip": "#192638",
-    "chip_hover": "#243750",
-    "border": "#2C415B",
-    "border_hi": "#4E6D92",
-    "text": "#EAF1F9",
-    "steel": "#C6D3E3",
-    "muted": "#8FA2B8",
-    "accent": "#5CC3F2",
-    "blue": "#5CC3F2",
-    "arc_border": "#5CC3F2",
-    "arc_text": "#C2ECFF",
-    "deep_blue": "#1F6FA8",
-    "cta_bg": "#2574DB",
-    "cta_hover": "#3488F0",
-    "amber": "#FBBF24",
-    "pill_active_bg": "#15324E",
-    "pill_active_fg": "#C2ECFF",
+    "bg": "#131417",
+    "titanium": "#2B2E35",
+    "gunmetal": "#0D0E11",
+    "panel_mid": "#1B1D22",
+    "card": "#202329",
+    "card_hi": "#292D35",
+    "well": "#16181C",
+    "well_lo": "#191B20",
+    "hdr_bar": "#17191E",
+    "code_bg": "#101114",
+    "chip": "#22252C",
+    "chip_hover": "#2D313A",
+    "border": "#343942",
+    "border_hi": "#4C5361",
+    "text": "#F3F5F8",
+    "steel": "#D2D7E0",
+    "muted": "#949BA8",
+    "accent": "#38BDF8",
+    "blue": "#38BDF8",
+    "arc_border": "#38BDF8",
+    "arc_text": "#E0F2FE",
+    "deep_blue": "#1D4ED8",
+    "cta_bg": "#2563EB",
+    "cta_hover": "#3B82F6",
+    "amber": "#F59E0B",
+    "pill_active_bg": "#172A3A",
+    "pill_active_fg": "#E0F2FE",
     "danger_bg": "#C92A38",
-    "danger_hover": "#E03544",
+    "danger_hover": "#E11D48",
     "danger_fg": "#FFFFFF",
+    "rw_on_bg": "#0F2922",
+    "rw_on_fg": "#6EE7B7",
+    "rw_on_border": "#10B981",
+    "popover_bg": "#181A20",
 }
 
 _PIPELINE_NODES: tuple[tuple[str, str], ...] = (
@@ -862,7 +866,7 @@ def apply_window_chrome(hwnd: int) -> dict[str, bool]:
             accent = _ACCENT_POLICY()
             accent.AccentState = 4  # ACCENT_ENABLE_ACRYLICBLURBEHIND
             accent.AccentFlags = 2
-            accent.GradientColor = 0x991A1008  # Translucent deep space navy-obsidian AABBGGRR
+            accent.GradientColor = 0x74161514  # Translucent smoky charcoal grey-black AABBGGRR
             data = _WINCOMPATTRDATA()
             data.Attribute = 19  # WCA_ACCENT_POLICY
             data.Data = ctypes.cast(ctypes.byref(accent), ctypes.c_void_p)
@@ -1299,12 +1303,12 @@ class DynamicIslandPill:
         self.root.configure(bg=_PALETTE["bg"])
         # Translucent frosted-glass effect (test harnesses may override to 0.0 cleanly)
         try:
-            self._compact_alpha = float(os.environ.get("AURA_COMPACT_ALPHA", "0.90"))
-            self._expanded_alpha = float(os.environ.get("AURA_EXPANDED_ALPHA", "0.81"))
+            self._compact_alpha = float(os.environ.get("AURA_COMPACT_ALPHA", "0.86"))
+            self._expanded_alpha = float(os.environ.get("AURA_EXPANDED_ALPHA", "0.75"))
             self.root.attributes("-alpha", self._compact_alpha)
         except Exception:
-            self._compact_alpha = 0.90
-            self._expanded_alpha = 0.81
+            self._compact_alpha = 0.86
+            self._expanded_alpha = 0.75
         _sync_tk_dpi_scaling(self.root)
 
         self._load_eye_assets()
@@ -1773,7 +1777,7 @@ class DynamicIslandPill:
         """Floating top-left Theme & Voice Persona dropdown (Cyber Blue / Ultron Mode / Megatron Mode)."""
         self.persona_popover = tk.Frame(
             self.frame,
-            bg="#121C2A",
+            bg="#181A20",
             highlightbackground=_PALETTE["border_hi"],
             highlightthickness=1,
             padx=6,
@@ -1791,7 +1795,7 @@ class DynamicIslandPill:
                 self.persona_popover,
                 text=p_lbl,
                 command=lambda k=p_key: self._select_persona(k),
-                bg="#121C2A",
+                bg="#181A20",
                 fg=_PALETTE["steel"],
                 activebackground=_PALETTE["pill_active_bg"],
                 activeforeground="#FFFFFF",
@@ -1823,7 +1827,7 @@ class DynamicIslandPill:
             sel = p_key == self.persona
             pt = _get_persona_theme(p_key)
             btn.configure(
-                bg=pt["pill_bg"] if sel else "#121C2A",
+                bg=pt["pill_bg"] if sel else "#181A20",
                 fg=pt["pill_fg"] if sel else _PALETTE["steel"],
             )
         try:
@@ -1903,7 +1907,7 @@ class DynamicIslandPill:
         """Compact upward @agent selector popup anchored above @auto button."""
         self.agent_popover = tk.Frame(
             self.frame,
-            bg="#121C2A",
+            bg="#181A20",
             highlightbackground=_PALETTE["border_hi"],
             highlightthickness=1,
             padx=6,
@@ -1922,7 +1926,7 @@ class DynamicIslandPill:
                 self.agent_popover,
                 text=lbl,
                 command=lambda k=lbl, r=role_key: self._pick_agent_from_popover(k, r),
-                bg="#121C2A",
+                bg="#181A20",
                 fg=_PALETTE["text"],
                 activebackground=_PALETTE["pill_active_bg"],
                 activeforeground="#FFFFFF",
@@ -1954,11 +1958,11 @@ class DynamicIslandPill:
         """Create the crisp in-island floating Model Selector popover matching Ultron HUD."""
         self.model_popover = tk.Frame(
             self.frame,
-            bg="#121C2A",
+            bg="#181A20",
             highlightbackground=_PALETTE["arc_border"],
             highlightthickness=1,
         )
-        self._model_popover_body = tk.Frame(self.model_popover, bg="#121C2A")
+        self._model_popover_body = tk.Frame(self.model_popover, bg="#181A20")
         self._model_popover_body.pack(fill="both", expand=True, padx=6, pady=6)
         self._populate_model_popover()
 
@@ -1987,7 +1991,7 @@ class DynamicIslandPill:
         hdr = tk.Label(
             self._model_popover_body,
             text="ACTIVE MODEL / PROVIDER",
-            bg="#121C2A",
+            bg="#181A20",
             fg=_PALETTE["muted"],
             font=(_TECH_FONT, 8, "bold"),
             anchor="w",
@@ -1997,7 +2001,7 @@ class DynamicIslandPill:
         hdr.pack(fill="x")
         for spec, disp in self._collect_model_choices():
             selected = spec == self.active_model_name
-            r_bg = _PALETTE["pill_active_bg"] if selected else "#121C2A"
+            r_bg = _PALETTE["pill_active_bg"] if selected else "#181A20"
             r_fg = "#FFFFFF" if selected else _PALETTE["steel"]
             prefix = "● " if selected else "   "
             row = tk.Button(
@@ -2034,7 +2038,7 @@ class DynamicIslandPill:
         """Compact Top-Right Frosted Apps Dropdown (Gmail / Google Calendar toggles + Configuration + MCP)."""
         self.apps_popover = tk.Frame(
             self.frame,
-            bg="#121C2A",
+            bg="#181A20",
             highlightbackground=_PALETTE["arc_border"],
             highlightthickness=1,
             padx=10,
@@ -2046,7 +2050,7 @@ class DynamicIslandPill:
         tk.Label(
             hdr,
             text="APPS",
-            bg="#121C2A",
+            bg="#181A20",
             fg=_PALETTE["arc_text"],
             font=(_TECH_FONT, 9, "bold"),
         ).pack(side="left")
@@ -2083,7 +2087,7 @@ class DynamicIslandPill:
             hdr,
             "✕",
             self._close_apps_popover,
-            bg="#121C2A",
+            bg="#181A20",
             fg=_PALETTE["muted"],
             hover_bg=_PALETTE["card"],
             hover_fg="#FFFFFF",
@@ -2091,7 +2095,7 @@ class DynamicIslandPill:
             pady=0,
         ).pack(side="right")
 
-        cat_row = tk.Frame(self.apps_popover, bg="#121C2A")
+        cat_row = tk.Frame(self.apps_popover, bg="#181A20")
         cat_row.pack(fill="x", pady=(0, 6))
         self._apps_cat_btns: dict[str, tk.Button] = {}
         for c_key, c_lbl in (("all", "All"), ("connected", "Connected"), ("mcp", "MCP")):
@@ -2109,7 +2113,7 @@ class DynamicIslandPill:
             cbtn.pack(side="left", padx=(0, 4))
             self._apps_cat_btns[c_key] = cbtn
 
-        self._apps_grid = tk.Frame(self.apps_popover, bg="#121C2A")
+        self._apps_grid = tk.Frame(self.apps_popover, bg="#181A20")
         self._apps_grid.pack(fill="both", expand=True)
         self._apps_grid.columnconfigure(0, weight=1)
 
@@ -2317,10 +2321,10 @@ class DynamicIslandPill:
         ]
 
         # Footer Save & Connect Row (Screenshot 3 bottom-right CTA)
-        cal_actions = tk.Frame(self.apps_popover, bg="#121C2A")
+        cal_actions = tk.Frame(self.apps_popover, bg="#181A20")
         cal_actions.pack(fill="x", pady=(6, 0))
         self.apps_feedback_lbl = tk.Label(
-            cal_actions, text="", bg="#121C2A", fg=_PALETTE["accent"], font=(_UI_FONT, 8)
+            cal_actions, text="", bg="#181A20", fg=_PALETTE["accent"], font=(_UI_FONT, 8)
         )
         self.apps_feedback_lbl.pack(side="left")
         self._mk_btn(
@@ -2611,16 +2615,16 @@ class DynamicIslandPill:
         """Create a sticky hover/click in-island Tools catalog popover (replaces buggy tk_popup)."""
         self.tools_popover = tk.Frame(
             self.frame,
-            bg="#121C2A",
+            bg="#181A20",
             highlightbackground=_PALETTE["arc_border"],
             highlightthickness=1,
         )
-        hdr = tk.Frame(self.tools_popover, bg="#172334")
+        hdr = tk.Frame(self.tools_popover, bg="#1F2229")
         hdr.pack(fill="x")
         self._tools_hdr_lbl = tk.Label(
             hdr,
             text="TOOLS & MCP CATALOG",
-            bg="#172334",
+            bg="#1F2229",
             fg=_PALETTE["arc_text"],
             font=(_TECH_FONT, 8, "bold"),
             padx=8,
@@ -2630,7 +2634,7 @@ class DynamicIslandPill:
         self._tools_pin_lbl = tk.Label(
             hdr,
             text="Hover · Click to pin",
-            bg="#172334",
+            bg="#1F2229",
             fg=_PALETTE["muted"],
             font=(_UI_FONT, 8),
             padx=4,
@@ -2640,14 +2644,14 @@ class DynamicIslandPill:
             hdr,
             "×",
             self._close_tools_popover,
-            bg="#172334",
+            bg="#1F2229",
             fg=_PALETTE["steel"],
             padx=6,
             pady=1,
-            border_color="#172334",
+            border_color="#1F2229",
         ).pack(side="right", padx=2)
 
-        quick_bar = tk.Frame(self.tools_popover, bg="#121C2A")
+        quick_bar = tk.Frame(self.tools_popover, bg="#181A20")
         quick_bar.pack(fill="x", padx=6, pady=(5, 4))
         for col in range(3):
             quick_bar.columnconfigure(col, weight=1)
@@ -4588,7 +4592,7 @@ class DynamicIslandPill:
             try:
                 cur_alpha = float(self.root.attributes("-alpha"))
                 if cur_alpha > 0.05:
-                    self.root.attributes("-alpha", getattr(self, "_expanded_alpha", 0.81))
+                    self.root.attributes("-alpha", getattr(self, "_expanded_alpha", 0.75))
             except Exception:
                 pass
             self.frame.configure(bg=_PALETTE["bg"])
@@ -4619,7 +4623,7 @@ class DynamicIslandPill:
             try:
                 cur_alpha = float(self.root.attributes("-alpha"))
                 if cur_alpha > 0.05:
-                    self.root.attributes("-alpha", getattr(self, "_compact_alpha", 0.90))
+                    self.root.attributes("-alpha", getattr(self, "_compact_alpha", 0.86))
             except Exception:
                 pass
             self.frame.configure(bg=_PALETTE["bg"] if keep_drawer else _PALETTE["gunmetal"])
@@ -5045,10 +5049,10 @@ class DynamicIslandPill:
         )
         if hasattr(self, "hdr_rw_btn"):
             self.hdr_rw_btn.configure(
-                text="⚡ RW Mode: OFF" if self.read_only else "⚡ RW Mode: ON",
-                bg=_PALETTE["well"] if self.read_only else theme["pill_bg"],
-                fg=_PALETTE["amber"] if self.read_only else theme["pill_fg"],
-                highlightbackground=_PALETTE["border"] if self.read_only else theme["arc_border"],
+                text="⚡ RW Mode: OFF" if self.read_only else "⚡ RW Mode: ON ●",
+                bg=_PALETTE["well"] if self.read_only else "#0F2922",
+                fg=_PALETTE["amber"] if self.read_only else "#6EE7B7",
+                highlightbackground=_PALETTE["border"] if self.read_only else "#10B981",
             )
         if hasattr(self, "compact_rw_btn"):
             self.compact_rw_btn.configure(
