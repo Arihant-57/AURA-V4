@@ -878,3 +878,56 @@ async def test_mid_execution_push_steer_preserves_partial_output_and_delivers_fi
             assert cancelled_resp.status_code == 200
             assert cancelled_resp.json()["stopped"] is True
             assert "Verified partial finding before stop" in cancelled_resp.json()["partial_output"]
+
+
+def test_hardware_telemetry_and_offline_vendor_bundles(tmp_path: Path):
+    import src.aura.server as web_srv
+
+    app = web_srv.create_app(workspace=tmp_path, read_only=True)
+    app.state.session = _make_fake_session(tmp_path)
+    with TestClient(app) as client:
+        tel = client.get("/api/telemetry")
+        assert tel.status_code == 200
+        data = tel.json()
+        for key in ("cpu_percent", "ram_percent", "gpu_percent", "vram_percent", "battery_percent", "ollama_online"):
+            assert key in data
+        assert isinstance(data["cpu_percent"], (int, float))
+        assert isinstance(data["ram_percent"], (int, float))
+
+        for bundle in (
+            "gsap.min.js",
+            "Flip.min.js",
+            "floating-ui.core.umd.min.js",
+            "floating-ui.dom.umd.min.js",
+            "siriwave.umd.min.js",
+            "lucide.min.js",
+            "motion.min.js",
+            "auto-animate.min.js",
+        ):
+            r = client.get(f"/static/vendor/{bundle}")
+            assert r.status_code == 200, bundle
+            assert len(r.content) > 1000, bundle
+
+        html_index = client.get("/").text
+        html_island = client.get("/island").text
+        for html in (html_index, html_island):
+            assert "/static/vendor/gsap.min.js" in html
+            assert "gsap.registerPlugin(window.Flip)" in html
+            assert "/static/vendor/siriwave.umd.min.js" in html
+            assert "/static/vendor/lucide.min.js" in html
+
+
+def test_switching_to_cloud_model_unloads_local_vram(tmp_path: Path):
+    import src.aura.server as web_srv
+
+    session = _make_fake_session(tmp_path)
+    session.unload_vram = AsyncMock(return_value=["qwen3.5:4b"])
+    app = web_srv.create_app(workspace=tmp_path, read_only=True)
+    app.state.session = session
+    with patch("src.aura.server.ProviderFactory.create_for_model", return_value=MagicMock(model="cloud:gemini/gemini-3.5-flash-lite")):
+        with TestClient(app) as client:
+            resp = client.post("/api/model", json={"model_override": "cloud:gemini/gemini-3.5-flash-lite", "low_vram": False})
+            assert resp.status_code == 200
+            session.unload_vram.assert_awaited_once_with(all_roles=True)
+
+

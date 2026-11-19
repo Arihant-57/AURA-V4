@@ -23,11 +23,13 @@ import uuid
 
 from fastapi import FastAPI, HTTPException, Response, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .agents.aura_v4 import _run_task, format_task_metrics
 from .config import resolve_workspace, load_aura_env, save_env_vars, get_default_storage_dir
 from .config.workspace import find_referenced_directory, normalize_workspace_path
+from .core.telemetry import get_hardware_telemetry
 from .core import (
     FastRouter,
     McpHub,
@@ -721,7 +723,7 @@ class AuraSession:
         if self.workspace_selected and self.workspace_memory is not None:
             ws_data = self.workspace_memory.load(self.hub.workspace)
             ws_facts = len(ws_data.get("facts", [])) + len(ws_data.get("commands", []))
-        prev_override = getattr(self.router, "override", None)
+        prev_override = getattr(self.router, "_override", getattr(self.router, "override", None))
         if prev_override:
             self.router.set_override(None)
         try:
@@ -1091,6 +1093,9 @@ def create_app(
 
     app = FastAPI(title="AURA V4", lifespan=lifespan)
     app.state.shutdown_fn = shutdown_fn
+    _static_dir = Path(__file__).resolve().parent / "static"
+    if _static_dir.is_dir():
+        app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
 
     @app.get("/", response_class=HTMLResponse)
     async def index() -> str:
@@ -1107,6 +1112,10 @@ def create_app(
     @app.get("/api/status")
     async def get_status() -> dict[str, Any]:
         return _get_session(app).status_dict()
+
+    @app.get("/api/telemetry")
+    async def get_telemetry() -> dict[str, Any]:
+        return get_hardware_telemetry()
 
     @app.get("/api/chats")
     async def list_chats() -> dict[str, Any]:
@@ -1232,6 +1241,10 @@ def create_app(
         session.low_vram = req.low_vram
         session.model_override = req.model_override.strip() if req.model_override else None
         effective = "qwen2.5-coder:7b" if session.low_vram else session.model_override
+        if effective and is_cloud_model_spec(effective):
+            # Evict pinned local Ollama weights from 6 GB VRAM when switching to cloud API.
+            session.router.set_override(None)
+            await session.unload_vram(all_roles=True)
         session.router.set_override(effective)
 
         default_model = effective or session.router.select(ModelRole.LIGHTWEIGHT)
@@ -1783,12 +1796,32 @@ def create_app(
     return app
 
 
+_VENDOR_HEAD_SCRIPTS = """
+  <script defer src="/static/vendor/gsap.min.js"></script>
+  <script defer src="/static/vendor/Flip.min.js"></script>
+  <script defer src="/static/vendor/floating-ui.core.umd.min.js"></script>
+  <script defer src="/static/vendor/floating-ui.dom.umd.min.js"></script>
+  <script defer src="/static/vendor/siriwave.umd.min.js"></script>
+  <script defer src="/static/vendor/lucide.min.js"></script>
+  <script defer src="/static/vendor/motion.min.js"></script>
+  <script type="module">
+    import autoAnimate from "/static/vendor/auto-animate.min.js";
+    window.autoAnimate = autoAnimate;
+  </script>
+  <script>
+    window.addEventListener("DOMContentLoaded", () => {
+      if (window.gsap && window.Flip) {
+        window.gsap.registerPlugin(window.Flip);
+      }
+    });
+  </script>"""
+
 _INDEX_HTML = r"""<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>AURA V4</title>
+  <title>AURA V4</title>""" + _VENDOR_HEAD_SCRIPTS + r"""
   <style>
     :root {
       --bg: #0d0d0d;
@@ -3759,7 +3792,7 @@ _ISLAND_HTML = r"""<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Aura V4 · Ultron Dynamic Island</title>
+<title>Aura V4 · Ultron Dynamic Island</title>""" + _VENDOR_HEAD_SCRIPTS + r"""
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Manrope:wght@400;500;600;700&family=Michroma&family=Syncopate:wght@700&display=swap" rel="stylesheet">
