@@ -838,6 +838,40 @@ def apply_window_chrome(hwnd: int) -> dict[str, bool]:
         no_border = ctypes.c_uint(0xFFFFFFFE)  # DWMWA_COLOR_NONE
         dwm.DwmSetWindowAttribute(wintypes.HWND(target), 34, ctypes.byref(no_border), ctypes.sizeof(no_border))
 
+        # Windows 11 DWM Acrylic Transient Backdrop (DWMWA_SYSTEMBACKDROP_TYPE = 38, DWMSBT_TRANSIENTWINDOW = 3)
+        backdrop = ctypes.c_int(3)
+        dwm.DwmSetWindowAttribute(wintypes.HWND(target), 38, ctypes.byref(backdrop), ctypes.sizeof(backdrop))
+
+        # Windows 10/11 Composition Acrylic / Blur-Behind fallback
+        try:
+            class _ACCENT_POLICY(ctypes.Structure):
+                _fields_ = [
+                    ("AccentState", ctypes.c_int),
+                    ("AccentFlags", ctypes.c_int),
+                    ("GradientColor", ctypes.c_uint),
+                    ("AnimationId", ctypes.c_int),
+                ]
+
+            class _WINCOMPATTRDATA(ctypes.Structure):
+                _fields_ = [
+                    ("Attribute", ctypes.c_int),
+                    ("Data", ctypes.c_void_p),
+                    ("SizeOfData", ctypes.c_size_t),
+                ]
+
+            accent = _ACCENT_POLICY()
+            accent.AccentState = 4  # ACCENT_ENABLE_ACRYLICBLURBEHIND
+            accent.AccentFlags = 2
+            accent.GradientColor = 0x991A1008  # Translucent deep space navy-obsidian AABBGGRR
+            data = _WINCOMPATTRDATA()
+            data.Attribute = 19  # WCA_ACCENT_POLICY
+            data.Data = ctypes.cast(ctypes.byref(accent), ctypes.c_void_p)
+            data.SizeOfData = ctypes.sizeof(accent)
+            user32.SetWindowCompositionAttribute(wintypes.HWND(target), ctypes.byref(data))
+            flags["acrylic"] = True
+        except Exception:
+            flags["acrylic"] = False
+
         if os.environ.get("AURA_PILL_STEALTH") == "1":
             flags["excluded"] = bool(user32.SetWindowDisplayAffinity(wintypes.HWND(target), WDA_EXCLUDEFROMCAPTURE))
     except Exception:
@@ -1265,9 +1299,12 @@ class DynamicIslandPill:
         self.root.configure(bg=_PALETTE["bg"])
         # Translucent frosted-glass effect (test harnesses may override to 0.0 cleanly)
         try:
-            self.root.attributes("-alpha", 0.93)
+            self._compact_alpha = float(os.environ.get("AURA_COMPACT_ALPHA", "0.90"))
+            self._expanded_alpha = float(os.environ.get("AURA_EXPANDED_ALPHA", "0.81"))
+            self.root.attributes("-alpha", self._compact_alpha)
         except Exception:
-            pass
+            self._compact_alpha = 0.90
+            self._expanded_alpha = 0.81
         _sync_tk_dpi_scaling(self.root)
 
         self._load_eye_assets()
@@ -4548,6 +4585,12 @@ class DynamicIslandPill:
 
         if self.expanded:
             self.island_state = "expanded"
+            try:
+                cur_alpha = float(self.root.attributes("-alpha"))
+                if cur_alpha > 0.05:
+                    self.root.attributes("-alpha", getattr(self, "_expanded_alpha", 0.81))
+            except Exception:
+                pass
             self.frame.configure(bg=_PALETTE["bg"])
             self.brow_canvas.pack(side="top", fill="x", padx=2)
             self.header.configure(bg=_PALETTE["hdr_bar"], height=48, highlightthickness=1)
@@ -4573,6 +4616,12 @@ class DynamicIslandPill:
                 self.drawer.pack(fill="both", expand=True)
         else:
             self.island_state = "compact"
+            try:
+                cur_alpha = float(self.root.attributes("-alpha"))
+                if cur_alpha > 0.05:
+                    self.root.attributes("-alpha", getattr(self, "_compact_alpha", 0.90))
+            except Exception:
+                pass
             self.frame.configure(bg=_PALETTE["bg"] if keep_drawer else _PALETTE["gunmetal"])
             self.header.configure(bg=_PALETTE["gunmetal"], height=38, highlightthickness=1)
             self.orb_canvas.configure(bg=_PALETTE["gunmetal"], width=30, height=30)

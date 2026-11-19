@@ -441,3 +441,32 @@ def test_fast_router_chrome_tab_variants_and_whatsapp_app(tmp_path: Path):
         assert mock_launch.call_args_list[1].args[0] == "whatsapp"
 
 
+def test_fast_router_deterministic_git_clone_and_verification(tmp_path: Path, monkeypatch):
+    from src.aura.mcp import desktop_server as ds
+
+    router = FastRouter(storage_dir=tmp_path)
+    # 1. Read-only mode blocks git clone
+    ro_res = router.try_handle("git clone https://github.com/octocat/Hello-World.git", read_only=True)
+    assert ro_res.handled is True
+    assert ro_res.action == "git_clone_blocked_ro"
+    assert "READ-ONLY BLOCKED" in ro_res.answer
+
+    # 2. RW mode executes git clone and verifies .git directory on disk
+    def _fake_git_run(cmd, cwd=None, env=None, capture_output=True, text=True, timeout=90, check=False):
+        target_dir = Path(cmd[-1])
+        (target_dir / ".git").mkdir(parents=True, exist_ok=True)
+        (target_dir / "README.md").write_text("# Hello", encoding="utf-8")
+        from types import SimpleNamespace
+
+        return SimpleNamespace(returncode=0, stdout="Cloning...", stderr="")
+
+    monkeypatch.setattr(ds.subprocess, "run", _fake_git_run)
+    monkeypatch.setenv("AURA_WORKSPACE", str(tmp_path))
+    rw_res = router.try_handle("clone repo octocat/Hello-World", read_only=False)
+    assert rw_res.handled is True
+    assert rw_res.action == "git_clone"
+    assert "VERIFIED GIT CLONE" in rw_res.answer
+    assert (tmp_path / "Hello-World" / ".git").exists()
+
+
+

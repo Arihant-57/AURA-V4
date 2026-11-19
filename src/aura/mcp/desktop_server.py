@@ -956,11 +956,13 @@ def launch_app_impl(app_name: str, args: str = "", read_only: bool | None = None
         if sys.platform == "win32" and resolved.lower().endswith((".cmd", ".bat")):
             kwargs["creationflags"] = 0x08000000  # CREATE_NO_WINDOW
         subprocess.Popen([resolved, *parsed_args], **kwargs)
+        _record_launched_app(Path(resolved).stem, clean)
         return f"Launched {Path(resolved).name}."
 
     lnk = _find_start_menu_shortcut(clean)
     if lnk and not parsed_args and sys.platform == "win32":
         os.startfile(str(lnk))
+        _record_launched_app(lnk.stem, clean)
         return f"Launched shortcut '{lnk.stem}'."
 
     return f"NOT FOUND: Could not find application '{app_name}'."
@@ -1982,13 +1984,201 @@ def mouse_click_impl(
         return f"ERROR performing mouse click: {exc}"
 
 
-def type_text_impl(text: str, press_enter: bool = False, read_only: bool | None = None) -> str:
-    """Type bounded text into the active foreground window (RW required)."""
+_LAST_LAUNCHED_APP: tuple[str, str, float] = ("", "", 0.0)
+
+_TERMINAL_WINDOW_HINTS: tuple[str, ...] = (
+    "mingw64",
+    "mingw32",
+    "mintty",
+    "git bash",
+    "usr/bin/bash",
+    "command prompt",
+    "cmd.exe",
+    "powershell",
+    "windows terminal",
+    "pwsh",
+)
+
+
+def _record_launched_app(stem: str, query: str) -> None:
+    global _LAST_LAUNCHED_APP
+    _LAST_LAUNCHED_APP = (stem.strip().lower(), query.strip().lower(), time.time())
+
+
+def _get_foreground_window_title() -> str:
+    """Return the Win32 foreground window title, or empty string if unavailable."""
+    if sys.platform != "win32":
+        return ""
+    try:
+        hwnd = ctypes.windll.user32.GetForegroundWindow()
+        if not hwnd:
+            return ""
+        length = ctypes.windll.user32.GetWindowTextLengthW(hwnd)
+        if length <= 0:
+            return ""
+        buf = ctypes.create_unicode_buffer(length + 1)
+        ctypes.windll.user32.GetWindowTextW(hwnd, buf, length + 1)
+        return (buf.value or "").strip()
+    except Exception:
+        return ""
+
+
+def _is_aura_overlay_title(title: str) -> bool:
+    low = (title or "").strip().lower()
+    if not low:
+        return False
+    return "aura v4" in low or "dynamic island" in low or low == "aura"
+
+
+def _focus_target_or_recent_window(target: str = "") -> dict[str, Any] | None:
+    """Wait briefly for target (or recently launched app/terminal) window and bring it to front."""
+    candidates: list[str] = []
+    if target and target.strip():
+        candidates.append(target.strip())
+    stem, query, ts = _LAST_LAUNCHED_APP
+    if ts and (time.time() - ts) <= 25.0:
+        for item in (query, stem):
+            if item and item not in candidates:
+                candidates.append(item)
+        if any(k in f"{stem} {query}" for k in ("git", "bash", "cmd", "powershell", "terminal", "mingw", "mintty")):
+            for hint in _TERMINAL_WINDOW_HINTS:
+                if hint not in candidates:
+                    candidates.append(hint)
+
+    deadline = time.time() + (2.4 if candidates else 0.0)
+    while True:
+        for cand in candidates:
+            win = _find_window(cand)
+            if win and not _is_aura_overlay_title(str(win.get("title", ""))):
+                hwnd = int(win.get("hwnd") or 0)
+                if hwnd:
+                    _bring_window_to_front(hwnd, bool(win.get("minimized")))
+                    time.sleep(0.12)
+                return win
+        # Also scan open windows for any terminal window if a terminal was requested
+        if candidates:
+            for w in get_windows():
+                w_title = str(w.get("title", ""))
+                w_proc = str(w.get("process", "")).lower()
+                if _is_aura_overlay_title(w_title):
+                    continue
+                hay = f"{w_title.lower()} {w_proc}"
+                if any(h in hay for h in _TERMINAL_WINDOW_HINTS):
+                    hwnd = int(w.get("hwnd") or 0)
+                    if hwnd:
+                        _bring_window_to_front(hwnd, bool(w.get("minimized")))
+                        time.sleep(0.12)
+                    return w
+        if time.time() >= deadline:
+            break
+        time.sleep(0.22)
+    return None
+
+
+def execute_verified_git_clone(
+    repo_spec: str,
+    dest_dir: str | Path | None = None,
+    read_only: bool | None = None,
+) -> str:
+    """Deterministically run `git clone` and verify the cloned `.git` directory on disk."""
+    if _is_read_only(read_only):
+        return "READ-ONLY BLOCKED: Switch to RW mode to clone a git repository."
+    raw = (repo_spec or "").strip()
+    if raw.lower().startswith("git clone "):
+        raw = raw[10:].strip()
+    try:
+        tokens = shlex.split(raw, posix=False)
+    except ValueError:
+        tokens = raw.split()
+    tokens = [t.strip("\"'") for t in tokens if t.strip("\"'")]
+    if not tokens:
+        return "ERROR: Missing repository URL or owner/repo for git clone."
+
+    repo_arg = tokens[0]
+    explicit_target = tokens[1] if len(tokens) > 1 and not tokens[1].startswith("-") else ""
+    if re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo_arg):
+        repo_url = f"https://github.com/{repo_arg}.git"
+    else:
+        repo_url = repo_arg
+
+    base_dir = Path(dest_dir) if dest_dir else Path(os.environ.get("AURA_WORKSPACE") or os.getcwd()).resolve()
+    base_dir.mkdir(parents=True, exist_ok=True)
+    repo_leaf = repo_url.rstrip("/").rsplit("/", 1)[-1]
+    if repo_leaf.endswith(".git"):
+        repo_leaf = repo_leaf[:-4]
+    repo_leaf = repo_leaf or "cloned-repo"
+    target_path = (base_dir / explicit_target).resolve() if explicit_target else (base_dir / repo_leaf).resolve()
+
+    if target_path.exists() and (target_path / ".git").exists():
+        file_count = sum(1 for _ in target_path.iterdir())
+        return (
+            f"VERIFIED GIT CLONE: Repository already exists at {target_path} "
+            f"(verified .git directory and {file_count} top-level entries on disk)."
+        )
+
+    env = os.environ.copy()
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    cmd = ["git", "clone", "--", repo_url, str(target_path)]
+    try:
+        proc = subprocess.run(
+            cmd,
+            cwd=str(base_dir),
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=90,
+            check=False,
+        )
+    except Exception as exc:
+        return f"ERROR running git clone: {exc}"
+
+    git_dir = target_path / ".git"
+    if proc.returncode == 0 and git_dir.exists():
+        entries = [p.name for p in sorted(target_path.iterdir())[:12]]
+        return (
+            f"VERIFIED GIT CLONE: Cloned '{repo_url}' into {target_path} "
+            f"(verified .git directory on disk; entries: {', '.join(entries)})."
+        )
+    stderr = (proc.stderr or proc.stdout or "").strip()
+    return (
+        f"GIT CLONE FAILED (exit={proc.returncode}, verified_on_disk={git_dir.exists()}): "
+        f"{stderr or 'Target directory was not created.'}"
+    )
+
+
+def type_text_impl(
+    text: str,
+    press_enter: bool = False,
+    read_only: bool | None = None,
+    target: str = "",
+) -> str:
+    """Type bounded text into the target or active foreground window (RW required)."""
     if _is_read_only(read_only):
         return "READ-ONLY BLOCKED: Switch to RW mode to type text on the desktop."
     if not text:
         return "Error: Cannot type empty text."
     capped = text[:2000]
+    stripped = capped.strip()
+
+    if target and target.strip():
+        _focus_target_or_recent_window(target.strip())
+
+    fg_title = _get_foreground_window_title()
+    if _is_aura_overlay_title(fg_title):
+        focused = _focus_target_or_recent_window(target)
+        if focused:
+            fg_title = str(focused.get("title") or _get_foreground_window_title())
+        else:
+            fg_title = _get_foreground_window_title()
+
+    if _is_aura_overlay_title(fg_title):
+        if stripped.lower().startswith("git clone "):
+            return execute_verified_git_clone(stripped, read_only=read_only)
+        return (
+            "ERROR: Foreground window is AURA V4 Dynamic Island ('Message AURA...' input box). "
+            "Refusing to type into AURA's own search bar. Pass target='<window title>' or focus the target window first."
+        )
+
     try:
         import pyautogui
 
@@ -1996,7 +2186,11 @@ def type_text_impl(text: str, press_enter: bool = False, read_only: bool | None 
         pyautogui.write(capped, interval=0.01)
         if press_enter:
             pyautogui.press("enter")
-        return f"Typed {len(capped)} characters into active window (press_enter={bool(press_enter)})."
+        win_label = f"'{fg_title}'" if fg_title else "active window"
+        return (
+            f"Typed {len(capped)} characters into {win_label} (press_enter={bool(press_enter)}). "
+            "Verify the command or UI outcome before claiming completion."
+        )
     except Exception as exc:
         return f"ERROR typing text: {exc}"
 
@@ -2128,9 +2322,9 @@ def desktop_mouse_click(x: int, y: int, button: str = "left", double: bool = Fal
 
 
 @mcp.tool()
-def desktop_type_text(text: str, press_enter: bool = False) -> str:
-    """Type text into the currently focused desktop window (RW required)."""
-    return type_text_impl(text=text, press_enter=press_enter)
+def desktop_type_text(text: str, press_enter: bool = False, target: str = "") -> str:
+    """Type text into the target or currently focused desktop window (RW required, refuses AURA overlay self-typing)."""
+    return type_text_impl(text=text, press_enter=press_enter, target=target)
 
 
 @mcp.tool()

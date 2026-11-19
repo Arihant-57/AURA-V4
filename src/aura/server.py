@@ -3795,328 +3795,637 @@ _ISLAND_HTML = r"""<!DOCTYPE html>
 <title>Aura V4 · Ultron Dynamic Island</title>""" + _VENDOR_HEAD_SCRIPTS + r"""
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Manrope:wght@400;500;600;700&family=Michroma&family=Syncopate:wght@700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Manrope:wght@400;500;600;700&family=Michroma&family=Syncopate:wght@700&display=swap" rel="stylesheet">
 <style>
+  :root {
+    --accent: #38BDF8;
+    --accent-glow: rgba(56, 189, 248, 0.42);
+    --accent-soft: rgba(56, 189, 248, 0.16);
+    --glass-bg: rgba(11, 19, 32, 0.58);
+    --glass-well: rgba(8, 15, 26, 0.48);
+    --glass-card: rgba(15, 26, 44, 0.52);
+    --glass-border: rgba(125, 211, 252, 0.24);
+  }
+  body[data-persona="ultron"] {
+    --accent: #F59E0B;
+    --accent-glow: rgba(245, 158, 11, 0.45);
+    --accent-soft: rgba(245, 158, 11, 0.18);
+    --glass-border: rgba(251, 191, 36, 0.28);
+  }
+  body[data-persona="megatron"] {
+    --accent: #F43F5E;
+    --accent-glow: rgba(244, 63, 94, 0.45);
+    --accent-soft: rgba(244, 63, 94, 0.18);
+    --glass-border: rgba(251, 113, 133, 0.28);
+  }
   * { box-sizing: border-box; }
   html, body {
     margin: 0; padding: 0; min-height: 100vh;
     background:
-      radial-gradient(900px 520px at 50% -4%, rgba(70,170,230,0.14), transparent 70%),
-      radial-gradient(700px 500px at 92% 100%, rgba(70,170,230,0.07), transparent 70%),
-      radial-gradient(700px 460px at 4% 62%, rgba(110,140,190,0.16), transparent 70%),
-      linear-gradient(165deg, #2B313C 0%, #1D2129 55%, #211D20 100%);
-    font-family: 'Manrope', system-ui, sans-serif;
-    color: #E8EDF4;
+      radial-gradient(680px 440px at 36% 46%, rgba(56, 189, 248, 0.26), transparent 68%),
+      radial-gradient(560px 400px at 56% 52%, rgba(139, 92, 246, 0.24), transparent 66%),
+      radial-gradient(520px 360px at 46% 32%, rgba(16, 185, 129, 0.20), transparent 68%),
+      radial-gradient(900px 540px at 14% 18%, rgba(14, 116, 144, 0.28), transparent 72%),
+      radial-gradient(880px 520px at 88% 82%, rgba(30, 64, 175, 0.26), transparent 72%),
+      linear-gradient(155deg, #050912 0%, #091322 48%, #060B14 100%);
+    background-attachment: fixed;
+    font-family: 'Inter', 'Manrope', system-ui, sans-serif;
+    color: #E8F0FA;
     -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
   }
-  button { font-family: inherit; cursor: pointer; transition: filter 0.14s, transform 0.1s; }
+  /* Ambient cosmic aurora ribbons behind the translucent island */
+  .aurora-backdrop {
+    position: fixed; inset: 0; pointer-events: none; z-index: 0; overflow: hidden;
+  }
+  .aurora-blob {
+    position: absolute; border-radius: 50%; filter: blur(68px); opacity: 0.55;
+    animation: auroraFloat 14s ease-in-out infinite alternate;
+  }
+  .aurora-blob.b1 { width: 520px; height: 340px; left: 22%; top: 24%; background: radial-gradient(circle, rgba(56,189,248,0.52), rgba(16,185,129,0.22), transparent 72%); }
+  .aurora-blob.b2 { width: 480px; height: 380px; left: 42%; top: 34%; background: radial-gradient(circle, rgba(168,85,247,0.48), rgba(59,130,246,0.25), transparent 72%); animation-delay: -5s; }
+  .aurora-blob.b3 { width: 420px; height: 280px; left: 32%; top: 16%; background: radial-gradient(circle, rgba(52,211,153,0.38), rgba(250,204,21,0.14), transparent 70%); animation-delay: -9s; }
+  @keyframes auroraFloat {
+    0% { transform: translate3d(-18px, -10px, 0) scale(1); }
+    100% { transform: translate3d(24px, 16px, 0) scale(1.08); }
+  }
+  button { font-family: inherit; cursor: pointer; transition: all 0.16s cubic-bezier(0.22, 1, 0.36, 1); }
   button:hover { filter: brightness(1.12); }
-  button:active { transform: translateY(1px); }
-  .wrap { max-width: 1280px; margin: 0 auto; padding: 34px 28px 48px; display: flex; flex-direction: column; gap: 28px; }
+  button:active { transform: scale(0.98); }
+  .wrap { position: relative; z-index: 1; max-width: 1280px; margin: 0 auto; padding: 24px 24px 44px; display: flex; flex-direction: column; gap: 22px; }
+  .glass-shell {
+    background: var(--glass-bg);
+    backdrop-filter: blur(28px) saturate(185%);
+    -webkit-backdrop-filter: blur(28px) saturate(185%);
+    border: 1px solid var(--glass-border);
+    box-shadow: 0 32px 80px rgba(0, 0, 0, 0.65), inset 0 1px 0 rgba(255, 255, 255, 0.16);
+  }
+  .glass-well {
+    position: relative;
+    background:
+      radial-gradient(420px 260px at 42% 38%, rgba(52, 211, 153, 0.14), transparent 70%),
+      radial-gradient(460px 300px at 58% 62%, rgba(139, 92, 246, 0.18), transparent 72%),
+      radial-gradient(380px 240px at 35% 68%, rgba(56, 189, 248, 0.16), transparent 70%),
+      var(--glass-well);
+    backdrop-filter: blur(22px) saturate(175%);
+    -webkit-backdrop-filter: blur(22px) saturate(175%);
+    border: 1px solid rgba(148, 163, 184, 0.18);
+  }
+  .glass-card {
+    background: var(--glass-card);
+    backdrop-filter: blur(18px) saturate(165%);
+    -webkit-backdrop-filter: blur(18px) saturate(165%);
+    border: 1px solid rgba(148, 163, 184, 0.2);
+    border-radius: 16px;
+  }
+  /* 3-Mode Compact Dynamic Island Pills (Photo 2) */
+  .mode-pill {
+    position: relative; display: flex; align-items: center; gap: 14px;
+    width: 560px; max-width: 100%; height: 64px; padding: 0 16px 0 10px;
+    border-radius: 999px; cursor: pointer;
+    background: rgba(9, 13, 22, 0.78);
+    backdrop-filter: blur(24px) saturate(180%);
+    transition: transform 0.22s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.22s ease;
+  }
+  .mode-pill:hover { transform: translateY(-2px) scale(1.008); }
+  .mode-pill.ultron {
+    border: 1px solid rgba(245, 158, 11, 0.62);
+    box-shadow: 0 14px 36px rgba(0,0,0,0.65), 0 0 24px rgba(245, 158, 11, 0.22), inset 0 1px 0 rgba(253, 224, 71, 0.25);
+  }
+  .mode-pill.megatron {
+    border: 1px solid rgba(244, 63, 94, 0.62);
+    box-shadow: 0 14px 36px rgba(0,0,0,0.65), 0 0 24px rgba(244, 63, 94, 0.22), inset 0 1px 0 rgba(253, 164, 175, 0.25);
+  }
+  .mode-pill.cyber {
+    border: 1px solid rgba(56, 189, 248, 0.68);
+    box-shadow: 0 14px 36px rgba(0,0,0,0.65), 0 0 26px rgba(56, 189, 248, 0.26), inset 0 1px 0 rgba(186, 230, 253, 0.28);
+  }
+  .galaxy-orb {
+    position: relative; width: 44px; height: 44px; border-radius: 50%; flex: none;
+    display: flex; align-items: center; justify-content: center;
+    overflow: hidden;
+  }
+  .galaxy-orb.ultron {
+    border: 1.5px solid rgba(251, 191, 36, 0.8);
+    background:
+      radial-gradient(circle at 50% 50%, #FFFBEB 0%, #FDE047 18%, #D97706 46%, #1C1308 78%),
+      conic-gradient(from 0deg, #F59E0B, #78350F, #FDE047, #451A03, #F59E0B);
+    box-shadow: 0 0 18px rgba(245, 158, 11, 0.55);
+  }
+  .galaxy-orb.megatron {
+    border: 1.5px solid rgba(244, 63, 94, 0.8);
+    background:
+      radial-gradient(circle at 50% 50%, #FFFFFF 0%, #FFE4E6 22%, #E11D48 48%, #1F0910 78%);
+    box-shadow: 0 0 18px rgba(244, 63, 94, 0.55);
+  }
+  .galaxy-orb.cyber {
+    border: 1.5px solid rgba(56, 189, 248, 0.85);
+    background:
+      radial-gradient(circle at 50% 50%, #F0F9FF 0%, #38BDF8 24%, #0369A1 52%, #081424 80%);
+    box-shadow: 0 0 18px rgba(56, 189, 248, 0.55);
+  }
+  .galaxy-orb::after {
+    content: ''; position: absolute; inset: 3px; border-radius: 50%;
+    border: 1px dashed rgba(255,255,255,0.35);
+    animation: orbSpin 9s linear infinite;
+  }
+  @keyframes orbSpin { to { transform: rotate(360deg); } }
+  .rw-pill-badge {
+    display: inline-flex; align-items: center; gap: 5px;
+    height: 28px; padding: 0 12px; border-radius: 999px;
+    font-size: 11px; font-weight: 700; letter-spacing: 0.04em;
+  }
+  .rw-pill-badge.ultron {
+    background: linear-gradient(90deg, rgba(245,158,11,0.35), rgba(120,53,15,0.45));
+    border: 1px solid rgba(251,191,36,0.7); color: #FEF3C7;
+  }
+  .rw-pill-badge.megatron {
+    background: linear-gradient(90deg, rgba(244,63,94,0.35), rgba(136,19,55,0.45));
+    border: 1px solid rgba(251,113,133,0.7); color: #FFE4E6;
+  }
+  .rw-pill-badge.cyber {
+    background: linear-gradient(90deg, rgba(56,189,248,0.35), rgba(12,74,110,0.45));
+    border: 1px solid rgba(56,189,248,0.75); color: #E0F2FE;
+  }
+  /* Header Nav Capsule & Controls (Photos 1 & 3) */
+  .top-nav-capsule {
+    display: flex; align-items: center; gap: 4px; padding: 4px;
+    border-radius: 999px; background: rgba(7, 13, 24, 0.55);
+    border: 1px solid rgba(148, 163, 184, 0.24);
+  }
+  .nav-tab {
+    height: 32px; padding: 0 15px; border-radius: 999px; border: 1px solid transparent;
+    background: transparent; color: #94A3B8; font-size: 12.5px; font-weight: 500;
+  }
+  .nav-tab.active {
+    background: linear-gradient(180deg, rgba(56, 189, 248, 0.28), rgba(14, 116, 144, 0.22));
+    border-color: var(--accent); color: #F0F9FF; font-weight: 600;
+    box-shadow: 0 0 14px var(--accent-glow);
+  }
+  .rw-mode-toggle {
+    display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 12px;
+    border-radius: 999px; background: rgba(16, 185, 129, 0.16);
+    border: 1px solid rgba(16, 185, 129, 0.65); color: #A7F3D0;
+    font-size: 12px; font-weight: 600; box-shadow: 0 0 14px rgba(16, 185, 129, 0.25);
+  }
+  .rw-dot {
+    width: 14px; height: 14px; border-radius: 50%; background: #10B981;
+    box-shadow: 0 0 10px #10B981;
+  }
   .pill-btn-arc {
-    border: 1px solid #6FCBF4;
-    background: linear-gradient(180deg, #237BB5, #134B78);
-    box-shadow: inset 0 1px 0 rgba(255,255,255,0.5), 0 3px 10px rgba(0,0,0,0.4), 0 0 14px rgba(70,170,230,0.3);
-    color: #F2F8FF; font-weight: 600; border-radius: 999px;
+    border: 1px solid #38BDF8;
+    background: linear-gradient(180deg, #2563EB, #1D4ED8);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.35), 0 4px 14px rgba(37, 99, 235, 0.45);
+    color: #F8FAFC; font-weight: 600; border-radius: 10px;
   }
   .pill-btn-steel {
-    border: 1px solid rgba(150,165,185,0.45);
-    background: linear-gradient(180deg, #4B5260, #333945);
-    box-shadow: inset 0 1px 0 rgba(215,228,250,0.18), 0 3px 8px rgba(0,0,0,0.4);
-    color: #DCE4EE; border-radius: 999px;
+    border: 1px solid rgba(148, 163, 184, 0.28);
+    background: rgba(15, 25, 42, 0.65);
+    backdrop-filter: blur(12px);
+    color: #DCE6F2; border-radius: 9px;
   }
   .pill-btn-danger {
-    border: 1px solid #E11D48;
-    background: linear-gradient(180deg, #4B1D2D, #32131E);
-    box-shadow: inset 0 1px 0 rgba(253,164,175,0.2), 0 3px 8px rgba(0,0,0,0.45);
-    color: #FDA4AF; font-weight: 600; border-radius: 999px;
+    border: 1px solid rgba(239, 68, 68, 0.7);
+    background: linear-gradient(90deg, #EF4444 0%, #EF4444 38%, rgba(69, 18, 28, 0.85) 39%, rgba(45, 14, 22, 0.9) 100%);
+    color: #FECACA; font-weight: 600; border-radius: 8px;
   }
-  .dropdown-menu { display: none; }
-  .dropdown-menu.open { display: flex; }
-  .agent-chip {
-    height: 32px; padding: 0 13px; border-radius: 999px;
-    border: 1px solid rgba(150,165,185,0.28);
-    background: linear-gradient(180deg, #353B46, #2B3039);
-    color: #C3CCD8; font-size: 12px; font-family: 'JetBrains Mono', monospace;
+  /* Upward & Corner Glass Popovers (Photos 1 & 3) */
+  .popover-card {
+    display: none; position: absolute; z-index: 40;
+    background: rgba(13, 21, 35, 0.88);
+    backdrop-filter: blur(26px) saturate(190%);
+    -webkit-backdrop-filter: blur(26px) saturate(190%);
+    border: 1px solid rgba(148, 163, 184, 0.32);
+    border-radius: 12px; padding: 6px;
+    box-shadow: 0 18px 42px rgba(0, 0, 0, 0.65);
+    flex-direction: column; gap: 2px;
   }
-  .agent-chip.active {
-    border-color: #6FCBF4;
-    background: linear-gradient(180deg, rgba(92,195,242,0.26), rgba(70,170,230,0.12));
-    color: #B4E1F8;
+  .popover-card.open { display: flex; }
+  .pop-item {
+    padding: 7px 11px; border-radius: 8px; font-size: 12.5px; color: #E2E8F0;
+    cursor: pointer; text-align: left; border: none; background: transparent;
+    display: flex; align-items: center; justify-content: space-between;
   }
-  .tab-pill {
-    height: 36px; padding: 0 18px; border-radius: 999px;
-    border: 1px solid rgba(150,165,185,0.28); background: transparent;
-    color: #C3CCD8; font-size: 13px;
+  .pop-item:hover, .pop-item.active {
+    background: rgba(56, 189, 248, 0.18); color: #7DD3FC;
   }
-  .tab-pill.active {
-    border-color: #6FCBF4;
-    background: linear-gradient(180deg, rgba(92,195,242,0.26), rgba(70,170,230,0.14));
-    color: #B4E1F8; font-weight: 600;
+  /* iOS Switch inside Apps Popover (Photo 3) */
+  .ios-switch {
+    position: relative; display: inline-block; width: 38px; height: 20px;
   }
-  .chat-scroll { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; padding-right: 4px; }
-  .model-opt { padding: 9px 12px; border-radius: 12px; font-size: 13px; color: #E8EDF4; cursor: pointer; }
-  .model-opt:hover { background: rgba(92,195,242,0.16); }
-  .model-opt.active { background: linear-gradient(180deg, rgba(92,195,242,0.24), rgba(70,170,230,0.12)); border: 1px solid #6FCBF4; color: #B4E1F8; }
+  .ios-switch input { opacity: 0; width: 0; height: 0; }
+  .ios-slider {
+    position: absolute; cursor: pointer; inset: 0;
+    background-color: rgba(51, 65, 85, 0.8); border-radius: 999px; transition: .2s;
+    border: 1px solid rgba(148, 163, 184, 0.3);
+  }
+  .ios-slider:before {
+    position: absolute; content: ""; height: 14px; width: 14px; left: 2px; bottom: 2px;
+    background-color: white; border-radius: 50%; transition: .2s;
+  }
+  .ios-switch input:checked + .ios-slider {
+    background-color: #3B82F6; border-color: #60A5FA;
+  }
+  .ios-switch input:checked + .ios-slider:before {
+    transform: translateX(18px);
+  }
+  .chat-scroll { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; padding: 8px 6px; }
 </style>
 </head>
-<body>
+<body data-persona="cyber">
+<div class="aurora-backdrop" aria-hidden="true">
+  <div class="aurora-blob b1"></div>
+  <div class="aurora-blob b2"></div>
+  <div class="aurora-blob b3"></div>
+</div>
+
 <div class="wrap">
-  <!-- Title -->
+  <!-- Header Title & Persona Showcase Banner -->
   <div style="display:flex; align-items:flex-end; justify-content:space-between; flex-wrap:wrap; gap:12px">
-    <div style="display:flex; flex-direction:column; gap:8px">
-      <div style="font-family:'Syncopate',sans-serif; font-size:28px; font-weight:700; letter-spacing:0.18em; text-transform:uppercase; background:linear-gradient(180deg,#F2F6FB 0%,#8795AA 100%); -webkit-background-clip:text; background-clip:text; color:transparent">Aura V4 · Ultron</div>
-      <div style="font-size:14px; color:#98A4B5">Dynamic island live console. Dark vibranium steel with a cold arc-blue core.</div>
+    <div style="display:flex; flex-direction:column; gap:4px">
+      <div style="font-family:'Syncopate',sans-serif; font-size:22px; font-weight:700; letter-spacing:0.2em; text-transform:uppercase; background:linear-gradient(180deg,#F8FAFC 0%,#94A3B8 100%); -webkit-background-clip:text; background-clip:text; color:transparent">Aura V4 · Ultron</div>
+      <div style="font-size:13px; color:#94A3B8">Translucent Dynamic Big Island &amp; 3-Mode Reactive Waveform Console — click any mode pill to morph theme.</div>
     </div>
-    <div style="font-family:'JetBrains Mono',monospace; font-size:12px; color:#98A4B5; text-align:right; line-height:1.7">pill radius 999px · panel radius 40px<br>steel hairline 1px #96A5B9</div>
+    <div style="display:flex; align-items:center; gap:10px">
+      <span style="font-family:'Michroma',sans-serif; font-size:10px; letter-spacing:0.18em; text-transform:uppercase; color:#94A3B8">02 · Shuttered standby</span>
+      <div style="display:flex; align-items:center; gap:10px; height:38px; padding:0 12px; border-radius:999px; background:rgba(11,18,30,0.72); border:1px solid rgba(148,163,184,0.28)">
+        <span style="font-family:'Michroma',sans-serif; font-size:9px; letter-spacing:0.15em; color:#94A3B8">AURA · STANDBY</span>
+        <button onclick="setShutter(false)" title="Wake Island" style="height:24px; padding:0 10px; border-radius:999px; border:1px solid rgba(56,189,248,0.45); background:rgba(56,189,248,0.15); color:#7DD3FC; font-size:11px">Wake</button>
+      </div>
+    </div>
   </div>
 
-  <!-- Row 1: Compact & Shuttered -->
-  <div style="display:flex; gap:40px; align-items:flex-start; flex-wrap:wrap">
-    <!-- 01 Compact -->
-    <div style="display:flex; flex-direction:column; gap:12px">
-      <div style="font-family:'Michroma',sans-serif; font-size:10px; letter-spacing:0.2em; text-transform:uppercase; color:#8FA0B5">01 · Compact island</div>
-      <div style="position:relative; display:flex; align-items:center; gap:14px; width:660px; max-width:100%; height:68px; padding:0 14px 0 12px; border-radius:999px; background:repeating-linear-gradient(0deg,rgba(255,255,255,0.018) 0px,rgba(255,255,255,0.018) 1px,rgba(0,0,0,0) 1px,rgba(0,0,0,0) 3px),linear-gradient(180deg,#464D5A 0%,#2E343E 45%,#21252C 100%); border:1px solid rgba(150,165,185,0.55); box-shadow:0 18px 40px rgba(0,0,0,0.5),0 0 0 1px rgba(0,0,0,0.55),inset 0 1px 0 rgba(215,228,250,0.22),inset 0 -1px 0 rgba(0,0,0,0.6)">
-        <div style="position:absolute; top:-1px; left:50%; margin-left:-34px; width:68px; height:7px; clip-path:polygon(0 0,100% 0,88% 100%,12% 100%); background:linear-gradient(180deg,#DCE4EE,#6B7587)"></div>
-        <div style="position:absolute; top:2px; left:50%; margin-left:-14px; width:28px; height:2px; border-radius:2px; background:#5CC3F2; box-shadow:0 0 8px rgba(70,170,230,0.9)"></div>
-        <div style="position:relative; flex:none; width:44px; height:44px; border-radius:50%; background:conic-gradient(from 200deg,#4A5160,#C9D3E0,#6B7587,#E6EDF5,#4A5160,#98A5B8,#4A5160); box-shadow:0 2px 6px rgba(0,0,0,0.6),0 0 16px rgba(92,195,242,0.32)">
-          <div style="position:absolute; inset:4px; border-radius:50%; background:#13161B"></div>
-          <div style="position:absolute; inset:9px; border-radius:50%; border:1px solid rgba(92,195,242,0.6); background:radial-gradient(circle at 50% 50%,#EAF8FF 0%,#5CC3F2 12%,#0F3A5C 30%,#121316 62%)"></div>
-        </div>
+  <!-- PHOTO 2: 3-Mode Dynamic Island Compact Pill Showcase -->
+  <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(360px, 1fr)); gap:16px; align-items:center">
+    <!-- 1. ULTRON MODE (Golden Galaxy) -->
+    <div style="display:flex; flex-direction:column; align-items:center; gap:6px">
+      <div style="font-size:11px; letter-spacing:0.14em; text-transform:uppercase; color:#CBD5E1; font-weight:600">ULTRON MODE (Golden Galaxy)</div>
+      <div class="mode-pill ultron" onclick="setPersona('ultron')">
+        <div class="galaxy-orb ultron"></div>
         <div style="flex:1; min-width:0; display:flex; align-items:center; justify-content:center">
-          <svg width="150" height="36" viewBox="0 0 150 36" aria-hidden="true">
-            <defs>
-              <linearGradient id="gfA" x1="0" x2="1" y1="0" y2="0"><stop offset="0" stop-color="#1F6FA8" stop-opacity="0"/><stop offset="0.25" stop-color="#1F6FA8"/><stop offset="0.5" stop-color="#D2EEFC"/><stop offset="0.75" stop-color="#1F6FA8"/><stop offset="1" stop-color="#1F6FA8" stop-opacity="0"/></linearGradient>
-              <radialGradient id="rgA"><stop offset="0" stop-color="#5CC3F2" stop-opacity="0.9"/><stop offset="1" stop-color="#5CC3F2" stop-opacity="0"/></radialGradient>
-            </defs>
-            <path id="filCompactDim" d="" fill="none" stroke="url(#gfA)" stroke-width="1" opacity="0.45"/>
-            <path id="filCompactMain" d="" fill="none" stroke="url(#gfA)" stroke-width="1.6" stroke-linecap="round"/>
-            <circle cx="75" cy="18" r="8" fill="url(#rgA)"/>
-            <circle cx="75" cy="18" r="1.8" fill="#E6F6FF"/>
-          </svg>
+          <svg class="pill-wave-svg" data-color="#F59E0B" data-core="#FEF08A" width="230" height="36" viewBox="0 0 230 36"></svg>
         </div>
-        <button id="compactModelBtn" style="flex:none; display:flex; align-items:center; gap:8px; height:38px; padding:0 14px; border-radius:999px; border:1px solid rgba(0,0,0,0.55); background:linear-gradient(180deg,#14171C,#1B1F26); color:#DCE4EE; font-size:13px; font-weight:500">qwen3.5:4b</button>
-        <div style="flex:none; display:flex; align-items:center; gap:8px; font-size:13px; color:#BAC4D1">
-          Mic
-          <button id="compactMicSwitch" role="switch" aria-checked="true" style="position:relative; width:40px; height:22px; padding:0; border-radius:999px; border:1px solid rgba(0,0,0,0.55); background:linear-gradient(180deg,#14171C,#1B1F26)">
-            <span id="compactMicThumb" style="position:absolute; top:2px; right:3px; width:16px; height:16px; border-radius:50%; background:linear-gradient(180deg,#8FD3F4,#2E8FD0); box-shadow:0 0 9px rgba(70,170,230,0.7)"></span>
-          </button>
-        </div>
-        <button onclick="stopAura()" class="pill-btn-steel" style="flex:none; height:38px; padding:0 18px; font-size:13px; font-weight:600">Stop</button>
-        <button onclick="setShutter(true)" aria-label="Shutter" title="Shutter Island" class="pill-btn-steel" style="flex:none; width:38px; height:38px; padding:0; display:flex; align-items:center; justify-content:center">◐</button>
-        <button id="compactShutdownBtn" onclick="shutdownAura()" aria-label="Shut Down AURA" title="Shut Down AURA V4 & Free VRAM" class="pill-btn-danger" style="flex:none; width:38px; height:38px; padding:0; display:flex; align-items:center; justify-content:center">⏻</button>
+        <span class="rw-pill-badge ultron">⚡ RW: ON</span>
+        <button onclick="event.stopPropagation(); toggleVoiceMic()" title="Voice Mic" style="background:transparent; border:none; color:#FDE68A; font-size:15px">🎙</button>
+        <button onclick="event.stopPropagation(); shutdownAura()" title="Power Off" style="width:28px; height:28px; border-radius:50%; border:1px solid rgba(239,68,68,0.6); background:rgba(127,29,29,0.45); color:#FCA5A5; font-size:13px">⏻</button>
       </div>
     </div>
 
-    <!-- 02 Shuttered -->
-    <div style="display:flex; flex-direction:column; gap:12px">
-      <div style="font-family:'Michroma',sans-serif; font-size:10px; letter-spacing:0.2em; text-transform:uppercase; color:#8FA0B5">02 · Shuttered standby</div>
-      <div style="display:flex; align-items:center; justify-content:space-between; gap:14px; width:440px; max-width:100%; height:46px; padding:0 12px 0 10px; border-radius:999px; background:repeating-linear-gradient(0deg,rgba(255,255,255,0.014) 0px,rgba(255,255,255,0.014) 1px,rgba(0,0,0,0) 1px,rgba(0,0,0,0) 3px),linear-gradient(180deg,#353B46,#21252C); border:1px solid rgba(150,165,185,0.32); box-shadow:0 12px 28px rgba(0,0,0,0.4)">
-        <div style="position:relative; flex:none; width:28px; height:28px; border-radius:50%; background:conic-gradient(from 200deg,#343A46,#6B7587,#434A58,#8693A6,#343A46)">
-          <div style="position:absolute; inset:3px; border-radius:50%; background:#13161B"></div>
-          <div style="position:absolute; left:7px; right:7px; top:13px; height:2px; border-radius:2px; background:linear-gradient(90deg,transparent,#8FA0B5,transparent)"></div>
+    <!-- 2. MEGATRON MODE (Crimson & White Eye Core) -->
+    <div style="display:flex; flex-direction:column; align-items:center; gap:6px">
+      <div style="font-size:11px; letter-spacing:0.14em; text-transform:uppercase; color:#CBD5E1; font-weight:600">MEGATRON MODE (Crimson &amp; White Eye Core)</div>
+      <div class="mode-pill megatron" onclick="setPersona('megatron')">
+        <div class="galaxy-orb megatron"></div>
+        <div style="flex:1; min-width:0; display:flex; align-items:center; justify-content:center">
+          <svg class="pill-wave-svg" data-color="#F43F5E" data-core="#FFE4E6" width="230" height="36" viewBox="0 0 230 36"></svg>
         </div>
-        <div style="font-family:'Michroma',sans-serif; font-size:10px; letter-spacing:0.18em; text-transform:uppercase; color:#98A4B5">Aura V4 · Shuttered</div>
-        <button onclick="setShutter(false)" role="switch" aria-checked="false" aria-label="Wake Aura" style="position:relative; width:40px; height:22px; padding:0; border-radius:999px; border:1px solid rgba(0,0,0,0.55); background:linear-gradient(180deg,#14171C,#1B1F26)"><span style="position:absolute; top:2px; left:3px; width:16px; height:16px; border-radius:50%; background:linear-gradient(180deg,#6E6A60,#4A4840)"></span></button>
+        <span class="rw-pill-badge megatron">⚡ RW: ON</span>
+        <button onclick="event.stopPropagation(); toggleVoiceMic()" title="Voice Mic" style="background:transparent; border:none; color:#FECDD3; font-size:15px">🎙</button>
+        <button onclick="event.stopPropagation(); shutdownAura()" title="Power Off" style="width:28px; height:28px; border-radius:50%; border:1px solid rgba(239,68,68,0.6); background:rgba(127,29,29,0.45); color:#FCA5A5; font-size:13px">⏻</button>
       </div>
-      <div style="font-family:'JetBrains Mono',monospace; font-size:12px; color:#98A4B5; line-height:1.6">Ultra-minimal. Eye shuttered, voice and agents asleep.<br>Toggle wakes the island into compact.</div>
+    </div>
+
+    <!-- 3. CYBER BLUE MODE (Default) -->
+    <div style="display:flex; flex-direction:column; align-items:center; gap:6px">
+      <div style="font-size:11px; letter-spacing:0.14em; text-transform:uppercase; color:#CBD5E1; font-weight:600">CYBER BLUE MODE (Default)</div>
+      <div class="mode-pill cyber" onclick="setPersona('cyber')">
+        <div class="galaxy-orb cyber"></div>
+        <div style="flex:1; min-width:0; display:flex; align-items:center; justify-content:center">
+          <svg class="pill-wave-svg" data-color="#38BDF8" data-core="#E0F2FE" width="230" height="36" viewBox="0 0 230 36"></svg>
+        </div>
+        <span class="rw-pill-badge cyber">⚡ RW: ON</span>
+        <button id="compactModelBtn" onclick="event.stopPropagation(); toggleModelMenu()" style="display:none">qwen3.5:4b</button>
+        <button onclick="setShutter(true)" aria-label="Shutter" title="Shutter Island" style="background:transparent; border:none; color:#BAE6FD; font-size:14px">🎙</button>
+        <button id="compactShutdownBtn" onclick="shutdownAura()" aria-label="Shut Down AURA" title="Shut Down AURA V4 & Free VRAM" style="width:28px; height:28px; border-radius:50%; border:1px solid rgba(239,68,68,0.65); background:rgba(127,29,29,0.5); color:#FCA5A5; font-size:13px">⏻</button>
+      </div>
     </div>
   </div>
 
-  <!-- Row 2: 03 Fully opened island -->
-  <div id="expandedShell" style="display:flex; flex-direction:column; gap:12px">
-    <div style="font-family:'Michroma',sans-serif; font-size:10px; letter-spacing:0.2em; text-transform:uppercase; color:#8FA0B5">03 · Fully opened island</div>
-    <div style="position:relative; width:100%; padding:24px; border-radius:40px; background:repeating-linear-gradient(0deg,rgba(255,255,255,0.016) 0px,rgba(255,255,255,0.016) 1px,rgba(0,0,0,0) 1px,rgba(0,0,0,0) 3px),linear-gradient(115deg,rgba(225,236,255,0) 28%,rgba(225,236,255,0.07) 44%,rgba(225,236,255,0) 60%),linear-gradient(180deg,#444B57 0%,#2C2D33 38%,#21252C 100%); border:1px solid rgba(150,165,185,0.6); box-shadow:0 44px 100px rgba(0,0,0,0.6),0 0 0 1px rgba(0,0,0,0.6),inset 0 1px 0 rgba(215,228,250,0.25),inset 0 -2px 0 rgba(0,0,0,0.55)">
-      <div style="position:absolute; top:-1px; left:50%; margin-left:-84px; width:168px; height:12px; clip-path:polygon(0 0,100% 0,90% 100%,10% 100%); background:linear-gradient(180deg,#DCE4EE,#5E6879)"></div>
-      <div style="position:absolute; top:3px; left:50%; margin-left:-40px; width:80px; height:2px; border-radius:2px; background:#5CC3F2; box-shadow:0 0 10px rgba(70,170,230,0.9)"></div>
-      <div style="position:relative; display:flex; align-items:center; gap:14px; height:76px; padding:0 16px 0 14px; border-radius:999px; background:linear-gradient(180deg,#171A20,#21252C); border:1px solid rgba(0,0,0,0.6)">
-        <div style="position:relative; flex:none; width:54px; height:54px; border-radius:50%; background:conic-gradient(from 200deg,#4A5160,#C9D3E0,#6B7587,#E6EDF5,#4A5160,#98A5B8,#4A5160); box-shadow:0 3px 8px rgba(0,0,0,0.7),0 0 24px rgba(92,195,242,0.38)">
-          <div style="position:absolute; inset:5px; border-radius:50%; background:#13161B"></div>
-          <div style="position:absolute; inset:10px; border-radius:50%; border:1px solid rgba(92,195,242,0.65); background:radial-gradient(circle at 50% 50%,#EAF8FF 0%,#5CC3F2 11%,#0F3A5C 30%,#121316 62%)"></div>
-          <div style="position:absolute; inset:17px; border-radius:50%; border:1px dashed rgba(92,195,242,0.35)"></div>
-        </div>
-        <div style="flex:none; width:1px; height:36px; background:rgba(0,0,0,0.7)"></div>
-        <div style="position:relative; flex:none">
-          <button id="modelBtn" onclick="toggleModelMenu()" class="pill-btn-steel" style="display:flex; align-items:center; gap:10px; height:42px; padding:0 16px; font-size:13px; font-weight:600">
-            <span id="modelLabel">qwen3.5:4b · Ollama</span> ▾
-          </button>
-          <div id="modelMenu" class="dropdown-menu" style="position:absolute; z-index:5; top:50px; left:0; width:230px; padding:6px; border-radius:18px; background:linear-gradient(180deg,#464D5A,#2E343E); border:1px solid rgba(150,165,185,0.5); box-shadow:0 22px 44px rgba(0,0,0,0.55); flex-direction:column; gap:2px">
-            <div class="model-opt active" onclick="pickModel('qwen3.5:4b','qwen3.5:4b · Ollama')">qwen3.5:4b · Ollama</div>
-            <div class="model-opt" onclick="pickModel('qwen2.5-coder:7b','qwen2.5-coder:7b · Ollama')">qwen2.5-coder:7b · Ollama</div>
-            <div class="model-opt" onclick="pickModel('cloud:gemini/gemini-3.8-flash','Gemini 3.8 · API')">Gemini 3.8 · API</div>
-            <div class="model-opt" onclick="pickModel('cloud:custom/auto','FreeLLMAPI · Auto')">FreeLLMAPI · Auto</div>
+  <!-- PHOTOS 1 & 3: 03 · Fully opened island (Translucent Glassmorphic Big Island) -->
+  <div id="expandedShell" style="display:flex; flex-direction:column; gap:8px">
+    <div style="display:flex; align-items:center; justify-content:space-between">
+      <div style="font-family:'Michroma',sans-serif; font-size:10px; letter-spacing:0.2em; text-transform:uppercase; color:#94A3B8">03 · Fully opened island</div>
+      <div id="voiceLabel" style="font-family:'Michroma',sans-serif; font-size:10px; letter-spacing:0.18em; text-transform:uppercase; color:#7DD3FC">Ultron voice · ready</div>
+    </div>
+
+    <div class="glass-shell" style="position:relative; width:100%; border-radius:22px; padding:14px 18px 12px; display:flex; flex-direction:column; gap:12px">
+      <!-- Top Header Bar matching Photos 1 & 3 -->
+      <div style="position:relative; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; padding-bottom:10px; border-bottom:1px solid rgba(148,163,184,0.18)">
+        <!-- Left: Galaxy/Arc Orb + AURA V4 + Persona Mode Selector -->
+        <div style="display:flex; align-items:center; gap:12px">
+          <div id="headerOrb" class="galaxy-orb cyber" style="width:38px; height:38px"></div>
+          <div style="font-size:20px; font-weight:600; letter-spacing:0.06em; color:#F1F5F9">AURA V4</div>
+          <div style="position:relative">
+            <button id="personaModeBtn" onclick="togglePopover('personaPopover')" style="height:28px; padding:0 11px; border-radius:7px; border:1px solid rgba(245,158,11,0.55); background:rgba(245,158,11,0.16); color:#FDE68A; font-size:12px; font-weight:600; display:flex; align-items:center; gap:6px">
+              <span id="personaModeLabel">Ultron Mode</span> ▾
+            </button>
+            <div id="personaPopover" class="popover-card" style="top:34px; left:0; width:190px">
+              <button class="pop-item" onclick="setPersona('cyber'); closeAllPopovers()">Cyber Blue (Default)</button>
+              <button class="pop-item" onclick="setPersona('ultron'); closeAllPopovers()">Ultron Mode (Gold)</button>
+              <button class="pop-item" onclick="setPersona('megatron'); closeAllPopovers()">Megatron Mode (Crimson)</button>
+            </div>
           </div>
         </div>
-        <div style="flex:none; width:1px; height:36px; background:rgba(0,0,0,0.7)"></div>
-        <div style="flex:none; display:flex; align-items:center; gap:6px; flex-wrap:wrap">
-          <button class="agent-chip active" onclick="pickAgentChip(this,'planner')">@planner</button>
-          <button class="agent-chip" onclick="pickAgentChip(this,'coder')">@coder</button>
-          <button class="agent-chip" onclick="pickAgentChip(this,'researcher')">@researcher</button>
-          <button class="agent-chip" onclick="sendQuick('check my unread emails')">@gmail</button>
-          <button class="agent-chip" onclick="sendQuick('what is on my calendar today?')">@calendar</button>
-        </div>
-        <div style="flex:1; min-width:140px; display:flex; flex-direction:column; align-items:center; gap:2px">
-          <svg width="210" height="36" viewBox="0 0 210 36" aria-hidden="true">
-            <defs>
-              <linearGradient id="gfB" x1="0" x2="1" y1="0" y2="0"><stop offset="0" stop-color="#1F6FA8" stop-opacity="0"/><stop offset="0.25" stop-color="#1F6FA8"/><stop offset="0.5" stop-color="#D2EEFC"/><stop offset="0.75" stop-color="#1F6FA8"/><stop offset="1" stop-color="#1F6FA8" stop-opacity="0"/></linearGradient>
-              <radialGradient id="rgB"><stop offset="0" stop-color="#5CC3F2" stop-opacity="0.9"/><stop offset="1" stop-color="#5CC3F2" stop-opacity="0"/></radialGradient>
-            </defs>
-            <path id="filHdrDim" d="" fill="none" stroke="url(#gfB)" stroke-width="1" opacity="0.45"/>
-            <path id="filHdrMain" d="" fill="none" stroke="url(#gfB)" stroke-width="1.7" stroke-linecap="round"/>
-            <circle cx="105" cy="18" r="8" fill="url(#rgB)"/>
-            <circle cx="105" cy="18" r="2" fill="#E6F6FF"/>
-          </svg>
-          <div id="voiceLabel" style="font-family:'Michroma',sans-serif; font-size:9px; letter-spacing:0.2em; text-transform:uppercase; color:#8FA0B5">Ultron voice · ready</div>
-        </div>
-        <button id="islandAppsBtn" onclick="toggleAppsPanel()" class="pill-btn-steel" style="flex:none; height:38px; padding:0 14px; font-size:12px; font-weight:600">⊞ Apps</button>
-        <button onclick="stopAura()" class="pill-btn-steel" style="flex:none; height:38px; padding:0 16px; font-size:13px; font-weight:600">■ Stop Aura</button>
-        <button onclick="setShutter(true)" aria-label="Shutter" title="Shutter Island" class="pill-btn-steel" style="flex:none; width:40px; height:40px; padding:0; display:flex; align-items:center; justify-content:center">◐</button>
-        <button id="islandShutdownBtn" onclick="shutdownAura()" aria-label="Shut Down AURA V4" title="Shut Down AURA V4 & Free VRAM" class="pill-btn-danger" style="flex:none; height:40px; padding:0 14px; font-size:13px; display:flex; align-items:center; gap:6px">⏻ Off</button>
-      </div>
 
-      <!-- Right-Corner Apps Connector Drawer -->
-      <div id="appsPanel" style="display:none; margin-top:12px; padding:14px 16px; border-radius:20px; background:linear-gradient(180deg,#181C22,#12151A); border:1px solid rgba(150,165,185,0.35); gap:14px; flex-wrap:wrap; align-items:center">
-        <div style="font-family:'Michroma',sans-serif; font-size:11px; letter-spacing:0.12em; text-transform:uppercase; color:#DCE4EE">Connect Apps</div>
-        <label style="display:flex; align-items:center; gap:6px; font-size:12px; cursor:pointer">
-          <input id="islGmailChk" type="checkbox" onchange="toggleIslandApp('gmail', this.checked)" style="accent-color:#6FCBF4"> Gmail (<span id="islGmailState">Off</span>)
-        </label>
-        <input id="islGmailAddr" type="email" placeholder="Gmail address" style="padding:6px 10px; border-radius:999px; border:1px solid rgba(150,165,185,0.28); background:#0E1014; color:#E8EEF6; font-size:12px; width:170px">
-        <input id="islGmailPass" type="password" placeholder="App password" style="padding:6px 10px; border-radius:999px; border:1px solid rgba(150,165,185,0.28); background:#0E1014; color:#E8EEF6; font-size:12px; width:130px">
-        <label style="display:flex; align-items:center; gap:6px; font-size:12px; cursor:pointer">
-          <input id="islCalChk" type="checkbox" onchange="toggleIslandApp('calendar', this.checked)" style="accent-color:#6FCBF4"> Calendar (<span id="islCalState">Local</span>)
-        </label>
-        <input id="islCalUrl" type="url" placeholder="iCal feed URL (.ics)" style="padding:6px 10px; border-radius:999px; border:1px solid rgba(150,165,185,0.28); background:#0E1014; color:#E8EEF6; font-size:12px; width:180px">
-        <button onclick="saveIslandApps()" class="pill-btn-arc" style="height:30px; padding:0 14px; font-size:12px">Save</button>
-      </div>
+        <!-- Center: 5-Tab Glass Capsule (Ask Aura | Agents | Hub & Focus | Web UI | Jarvis) -->
+        <div class="top-nav-capsule">
+          <button class="nav-tab active" onclick="switchIslandTab(this, 'ask')">Ask Aura</button>
+          <button class="nav-tab" onclick="switchIslandTab(this, 'agents')">Agents</button>
+          <button class="nav-tab" onclick="switchIslandTab(this, 'hub')">Hub &amp; Focus</button>
+          <button class="nav-tab" onclick="location.href='/'">Web UI</button>
+          <button class="nav-tab" onclick="switchIslandTab(this, 'jarvis')">Jarvis</button>
+        </div>
 
-      <!-- Body -->
-      <div style="display:flex; gap:16px; margin-top:18px; min-height:476px">
-        <!-- Left Chat Well -->
-        <div style="flex:1; min-width:0; display:flex; flex-direction:column; gap:12px; padding:16px; border-radius:28px; background:linear-gradient(180deg,#14171C,#1A1E25); border:1px solid rgba(0,0,0,0.6)">
-          <button onclick="toggleReasoning()" style="display:flex; align-items:center; gap:10px; width:100%; padding:10px 14px; border-radius:14px; border:1px solid rgba(150,165,185,0.3); background:linear-gradient(180deg,#353B46,#2B3039); color:#E8EDF4; font-size:13px; font-weight:500; text-align:left">
-            ▾ Reasoning steps
-            <span id="toolsBadge" style="margin-left:auto; padding:3px 11px; border-radius:999px; border:1px solid rgba(150,165,185,0.5); color:#8FD3F4; font-size:11px">0 turns</span>
+        <!-- Right: ⚡ RW Mode: ON ● + ⊞ Apps + Red Off Toggle -->
+        <div style="display:flex; align-items:center; gap:10px">
+          <button id="rwToggleBtn" onclick="toggleRwMode()" class="rw-mode-toggle" title="Toggle Read-Write / Read-Only Mode">
+            <span id="rwToggleText">⚡ RW Mode: ON</span>
+            <span id="rwToggleDot" class="rw-dot"></span>
           </button>
-          <div id="reasoningTrace" style="display:none; padding:10px 14px; border-radius:12px; background:#101216; font-family:'JetBrains Mono',monospace; font-size:12px; color:#98A4B5">Awaiting execution metrics.</div>
+          <button id="islandAppsBtn" onclick="toggleAppsPanel()" class="pill-btn-steel" style="height:34px; padding:0 13px; font-size:12.5px; font-weight:600; display:flex; align-items:center; gap:6px">⊞ Apps</button>
+          <button id="islandShutdownBtn" onclick="shutdownAura()" aria-label="Shut Down AURA V4" title="Shut Down AURA V4 & Free VRAM" class="pill-btn-danger" style="height:34px; padding:0 14px 0 28px; font-size:12.5px">Off</button>
+        </div>
+
+        <!-- PHOTO 3: Top-Right Floating Apps Connector Popover (id="appsPanel") -->
+        <div id="appsPanel" style="display:none; position:absolute; top:46px; right:4px; z-index:50; width:275px; padding:14px; border-radius:14px; background:rgba(13,22,36,0.92); backdrop-filter:blur(28px) saturate(190%); border:1px solid rgba(148,163,184,0.34); box-shadow:0 24px 54px rgba(0,0,0,0.75); flex-direction:column; gap:11px">
+          <div style="display:flex; align-items:center; justify-content:space-between">
+            <div style="display:flex; align-items:center; gap:8px; font-size:13px; font-weight:500; color:#F1F5F9">
+              <span style="color:#EF4444; font-weight:700">M</span> Gmail <span id="islGmailState" style="font-size:11px; color:#94A3B8">(On)</span>
+            </div>
+            <label class="ios-switch">
+              <input id="islGmailChk" type="checkbox" checked onchange="toggleIslandApp('gmail', this.checked)">
+              <span class="ios-slider"></span>
+            </label>
+          </div>
+          <div style="display:flex; align-items:center; justify-content:space-between">
+            <div style="display:flex; align-items:center; gap:8px; font-size:13px; font-weight:500; color:#F1F5F9">
+              <span style="color:#38BDF8">📅</span> Google Calendar <span id="islCalState" style="font-size:11px; color:#94A3B8">(Local)</span>
+            </div>
+            <label class="ios-switch">
+              <input id="islCalChk" type="checkbox" checked onchange="toggleIslandApp('calendar', this.checked)">
+              <span class="ios-slider"></span>
+            </label>
+          </div>
+          <details style="background:rgba(8,14,24,0.65); border:1px solid rgba(148,163,184,0.22); border-radius:8px; padding:7px 10px">
+            <summary style="font-size:12px; color:#94A3B8; cursor:pointer; list-style:none; display:flex; justify-content:space-between; align-items:center">Configuration <span>⌄</span></summary>
+            <div style="display:flex; flex-direction:column; gap:7px; margin-top:8px">
+              <input id="islGmailAddr" type="email" placeholder="Gmail address" style="width:100%; padding:6px 9px; border-radius:7px; border:1px solid rgba(148,163,184,0.25); background:#09101C; color:#E8EEF6; font-size:12px">
+              <input id="islGmailPass" type="password" placeholder="Gmail App Password" style="width:100%; padding:6px 9px; border-radius:7px; border:1px solid rgba(148,163,184,0.25); background:#09101C; color:#E8EEF6; font-size:12px">
+            </div>
+          </details>
+          <details style="background:rgba(8,14,24,0.65); border:1px solid rgba(148,163,184,0.22); border-radius:8px; padding:7px 10px">
+            <summary style="font-size:12px; color:#94A3B8; cursor:pointer; list-style:none; display:flex; justify-content:space-between; align-items:center">Configuration fields <span>⌄</span></summary>
+            <div style="display:flex; flex-direction:column; gap:7px; margin-top:8px">
+              <input id="islCalUrl" type="url" placeholder="iCal feed URL (.ics)" style="width:100%; padding:6px 9px; border-radius:7px; border:1px solid rgba(148,163,184,0.25); background:#09101C; color:#E8EEF6; font-size:12px">
+            </div>
+          </details>
+          <button onclick="saveIslandApps()" class="pill-btn-steel" style="align-self:flex-end; height:32px; padding:0 14px; font-size:12px; font-weight:600; border-color:rgba(148,163,184,0.4)">Save &amp; Connect</button>
+        </div>
+      </div>
+
+      <!-- Main Body: Left Translucent Chat Well + Right Executive Summary Rail -->
+      <div style="display:flex; gap:14px; min-height:470px">
+        <!-- Left Chat Well -->
+        <div class="glass-well" style="flex:1; min-width:0; border-radius:16px; padding:12px 16px; display:flex; flex-direction:column; gap:10px">
+          <!-- Reasoning Trace Header -->
+          <div onclick="toggleReasoning()" style="display:flex; align-items:center; gap:12px; padding:6px 4px; border-bottom:1px solid rgba(148,163,184,0.14); cursor:pointer; font-size:12.5px; color:#CBD5E1">
+            <span>▾ Reasoning Trace</span>
+            <span style="color:rgba(148,163,184,0.35)">|</span>
+            <span id="toolsBadge" style="color:#94A3B8; font-size:12px">0 tools called</span>
+          </div>
+          <div id="reasoningTrace" style="display:none; padding:9px 12px; border-radius:10px; background:rgba(7,12,22,0.75); border:1px solid rgba(56,189,248,0.22); font-family:'JetBrains Mono',monospace; font-size:11.5px; color:#93C5FD">Awaiting execution metrics.</div>
+
+          <!-- Chat Messages -->
           <div id="chatLog" class="chat-scroll">
             <div style="display:flex; gap:12px; align-items:flex-start">
-              <div style="width:28px; height:28px; flex:none; border-radius:50%; border:1px solid #5CC3F2; background:radial-gradient(circle at 50% 50%,#EAF8FF 0%,#5CC3F2 18%,#0F3A5C 48%,#121316 80%)"></div>
-              <div style="font-size:14px; line-height:1.55; color:#DCE3EC">Aura V4 Ultron online. Select an agent chip, ask naturally below, or trigger <span style="font-family:'JetBrains Mono',monospace; font-size:12px; padding:1px 6px; border-radius:6px; background:#2D333E; color:#8FD3F4">Summarize my day</span>.</div>
+              <div style="width:28px; height:28px; border-radius:50%; background:rgba(30,41,59,0.75); border:1px solid rgba(148,163,184,0.35); display:flex; align-items:center; justify-content:center; font-size:12px; color:#CBD5E1; flex:none">👤</div>
+              <div style="display:flex; flex-direction:column; gap:4px">
+                <div style="font-size:13px; font-weight:600; color:#E2E8F0">You</div>
+                <div style="font-size:14px; color:#CBD5E1; line-height:1.5">How do you manage my daily priorities and desktop workflows today?</div>
+              </div>
+            </div>
+            <div style="display:flex; gap:12px; align-items:flex-start">
+              <div style="width:28px; height:28px; border-radius:50%; border:1.5px solid #38BDF8; background:radial-gradient(circle at 50% 50%,#E0F2FE 0%,#38BDF8 30%,#0F172A 80%); box-shadow:0 0 12px rgba(56,189,248,0.45); flex:none"></div>
+              <div style="display:flex; flex-direction:column; gap:6px">
+                <div style="font-size:13px; font-weight:700; color:#F1F5F9; letter-spacing:0.04em">AURA</div>
+                <div style="font-size:14px; color:#DCE6F2; line-height:1.58">Aura natural conversational context online. Analyzing your daily tasks, git repositories, and live desktop windows. Use <span style="font-family:'JetBrains Mono',monospace; font-size:12px; padding:1px 6px; border-radius:6px; background:rgba(56,189,248,0.16); color:#7DD3FC">Summarize my day</span> or open the upward <span style="font-family:'JetBrains Mono',monospace; font-size:12px; color:#7DD3FC">@auto ▲</span> and <span style="font-family:'JetBrains Mono',monospace; font-size:12px; color:#7DD3FC">+ Tools ▲</span> menus below.</div>
+              </div>
             </div>
           </div>
-          <!-- Omni Composer -->
-          <div style="display:flex; flex-direction:column; gap:10px; padding:12px 14px; border-radius:22px; background:linear-gradient(180deg,#2C313A,#353B46); border:1px solid rgba(150,165,185,0.5)">
-            <input id="promptInput" type="text" placeholder="Ask Aura anything, or type / for commands and @ for agents" style="width:100%; border:none; outline:none; background:transparent; color:#E8EDF4; font-size:14px; font-family:inherit" onkeydown="if(event.key==='Enter') sendPrompt()">
-            <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap">
-              <button onclick="sendQuick('research online about ')" class="pill-btn-steel" style="height:28px; padding:0 12px; font-size:12px">DeepSearch</button>
-              <button onclick="sendQuick('@planner analyze step-by-step: ')" class="pill-btn-steel" style="height:28px; padding:0 12px; font-size:12px">Think</button>
-              <button onclick="sendQuick('what is on my screen?')" class="pill-btn-steel" style="height:28px; padding:0 12px; font-size:12px">Screen</button>
-              <button onclick="sendQuick('git status')" class="pill-btn-steel" style="height:28px; padding:0 12px; font-size:12px">Git</button>
-              <button onclick="sendPrompt()" class="pill-btn-arc" style="margin-left:auto; height:34px; padding:0 20px; font-size:13px">Send ↑</button>
+
+          <!-- Bottom Omni Composer with Upward Popovers (Photos 1 & 3) -->
+          <div style="position:relative; display:flex; flex-direction:column; gap:10px; padding:11px 14px; border-radius:14px; background:rgba(9, 16, 28, 0.66); border:1px solid rgba(148, 163, 184, 0.25)">
+            <!-- Upward Model Popover -->
+            <div id="modelMenu" class="popover-card" style="bottom:86px; right:215px; width:215px">
+              <button class="pop-item active" onclick="pickModel('qwen3.5:4b','qwen3.5:4b')">qwen3.5:4b · Ollama</button>
+              <button class="pop-item" onclick="pickModel('qwen2.5-coder:7b','qwen2.5-coder:7b')">qwen2.5-coder:7b · Ollama</button>
+              <button class="pop-item" onclick="pickModel('cloud:gemini/gemini-3.8-flash','Gemini 3.8')">Gemini 3.8 · Cloud API</button>
+              <button class="pop-item" onclick="pickModel('cloud:custom/auto','FreeLLMAPI')">FreeLLMAPI · Auto</button>
+            </div>
+
+            <!-- Upward @auto Agent Popover (Photos 1 & 3) -->
+            <div id="agentPopover" class="popover-card open" style="bottom:86px; right:106px; width:130px">
+              <button class="pop-item active" onclick="pickAgentChip(this,'planner')">@planner</button>
+              <button class="pop-item" onclick="pickAgentChip(this,'coder')">@coder</button>
+              <button class="pop-item" onclick="pickAgentChip(this,'researcher')">@researcher</button>
+              <button class="pop-item" onclick="sendQuick('check my unread emails')">@gmail</button>
+              <button class="pop-item" onclick="sendQuick('what is on my calendar today?')">@calendar</button>
+            </div>
+
+            <!-- Upward + Tools Popover (Photos 1 & 3) -->
+            <div id="toolsPopover" class="popover-card open" style="bottom:86px; right:10px; width:120px">
+              <button class="pop-item" onclick="sendQuick('research online about ')">DeepSearch</button>
+              <button class="pop-item" onclick="sendQuick('@planner analyze step-by-step: ')">Think</button>
+              <button class="pop-item" onclick="sendQuick('what is on my screen?')">Screen, Git</button>
+              <button class="pop-item" onclick="sendQuick('inspect workspace files')">Attach</button>
+            </div>
+
+            <!-- Input Row + Inline Popover Triggers -->
+            <div style="display:flex; align-items:center; gap:8px">
+              <input id="promptInput" type="text" placeholder="Message AURA..." style="flex:1; min-width:0; border:none; outline:none; background:transparent; color:#F1F5F9; font-size:14px; font-family:inherit" onkeydown="if(event.key==='Enter') sendPrompt()">
+              <button id="modelBtn" onclick="togglePopover('modelMenu')" class="pill-btn-steel" style="height:28px; padding:0 11px; font-size:12px; display:flex; align-items:center; gap:6px">
+                <span id="modelLabel">qwen3.5:4b</span> <span>▲</span>
+              </button>
+              <button id="agentMenuBtn" onclick="togglePopover('agentPopover')" class="pill-btn-steel" style="height:28px; padding:0 12px; font-size:12px; display:flex; align-items:center; gap:6px">
+                <span id="agentBtnLabel">@auto</span> <span>▲</span>
+              </button>
+              <button id="toolsMenuBtn" onclick="togglePopover('toolsPopover')" class="pill-btn-steel" style="height:28px; padding:0 11px; font-size:12px; display:flex; align-items:center; gap:6px">
+                <span>+ Tools</span> <span>▲</span>
+              </button>
+            </div>
+
+            <!-- Bottom Action Row: ■ Stop Aura | 🎙 Mic ... Enter to send ↵ -->
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:8px">
+              <div style="display:flex; align-items:center; gap:8px">
+                <button onclick="stopAura()" class="pill-btn-steel" style="height:32px; padding:0 13px; font-size:12.5px; display:flex; align-items:center; gap:6px">■ Stop Aura</button>
+                <button id="compactMicSwitch" onclick="toggleVoiceMic()" class="pill-btn-steel" style="height:32px; padding:0 13px; font-size:12.5px; display:flex; align-items:center; gap:6px">🎙 Mic</button>
+              </div>
+              <button onclick="sendPrompt()" style="background:transparent; border:none; color:#94A3B8; font-size:12px; font-family:'JetBrains Mono',monospace">Enter to send ↵</button>
             </div>
           </div>
         </div>
 
-        <!-- Middle Column -->
-        <div style="flex:none; width:280px; display:flex; flex-direction:column; gap:14px">
-          <div style="display:flex; flex-direction:column; gap:12px; padding:16px; border-radius:24px; background:linear-gradient(180deg,rgba(70,170,230,0.2),rgba(70,170,230,0) 55%),linear-gradient(180deg,#3C4350,#292E37); border:1px solid rgba(150,165,185,0.4)">
-            <div style="font-family:'Michroma',sans-serif; font-size:11px; letter-spacing:0.1em; text-transform:uppercase; color:#DCE4EE">◆ Executive summary</div>
-            <button onclick="sendQuick('morning briefing')" class="pill-btn-arc" style="height:40px; font-size:14px">Summarize my day</button>
-            <div style="font-size:11px; letter-spacing:0.16em; text-transform:uppercase; color:#98A4B5">Live briefing</div>
-            <div id="briefingList" style="display:flex; flex-direction:column; gap:8px; font-size:13px; color:#DCE3EC">
-              <div style="color:#98A4B5">Syncing workspace status...</div>
+        <!-- Right Column: Executive Summary — Live Briefing, Todos, Agent Pipeline (Photos 1 & 3) -->
+        <div style="flex:none; width:275px; display:flex; flex-direction:column; gap:10px">
+          <!-- Executive Summary Card -->
+          <div class="glass-card" style="padding:13px 14px; display:flex; flex-direction:column; gap:10px">
+            <div style="font-size:11px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; color:#94A3B8">EXECUTIVE SUMMARY — LIVE BRIEFING</div>
+            <div id="briefingList" style="display:flex; flex-direction:column; gap:6px; font-size:12.5px; color:#CBD5E1; line-height:1.45">
+              <div>• 0 To-dos pending today</div>
+              <div>• Next event: No calendar events today</div>
+              <div>• Gmail: Connected (Inbox ready)</div>
             </div>
+            <button onclick="sendQuick('morning briefing')" class="pill-btn-arc" style="height:36px; font-size:13px; width:100%">Summarize my day</button>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px">
+              <button onclick="sendQuick('what is on my calendar today?')" class="pill-btn-steel" style="height:30px; font-size:12px">Agenda (Cal)</button>
+              <button onclick="sendQuick('check my unread emails')" class="pill-btn-steel" style="height:30px; font-size:12px">Gmail (Inbox)</button>
+            </div>
+            <div id="agendaDate" style="display:none"></div>
+            <div id="agendaList" style="display:none"></div>
+            <div id="gmailList" style="display:none"></div>
           </div>
-          <div style="flex:1; display:flex; flex-direction:column; gap:10px; padding:16px; border-radius:24px; background:linear-gradient(180deg,#353B46,#272C35); border:1px solid rgba(150,165,185,0.28)">
-            <div style="display:flex; justify-content:space-between; align-items:center">
-              <div style="font-family:'Michroma',sans-serif; font-size:11px; letter-spacing:0.1em; text-transform:uppercase; color:#DCE4EE">◆ Gmail</div>
-              <button onclick="sendQuick('check my unread emails')" class="pill-btn-steel" style="height:24px; padding:0 10px; font-size:11px">Inbox</button>
-            </div>
-            <div id="gmailList" style="display:flex; flex-direction:column; gap:8px">
-              <div style="font-size:12px; color:#98A4B5">Gmail not connected — open Apps to connect Gmail.</div>
-            </div>
-          </div>
-        </div>
 
-        <!-- Right Column -->
-        <div style="flex:none; width:280px; display:flex; flex-direction:column; gap:14px">
-          <div style="display:flex; flex-direction:column; gap:10px; padding:16px; border-radius:24px; background:linear-gradient(180deg,#353B46,#272C35); border:1px solid rgba(150,165,185,0.28)">
+          <!-- Todos Card -->
+          <div class="glass-card" style="flex:1; padding:13px 14px; display:flex; flex-direction:column; gap:8px">
             <div style="display:flex; justify-content:space-between; align-items:center">
-              <div style="font-family:'Michroma',sans-serif; font-size:11px; letter-spacing:0.1em; text-transform:uppercase; color:#DCE4EE">◆ Agenda</div>
-              <div id="agendaDate" style="font-size:12px; color:#98A4B5"></div>
+              <div style="font-size:13px; font-weight:600; color:#E2E8F0">Todos <span id="todoCount" style="color:#94A3B8; font-weight:400">(0/0)</span></div>
+              <button onclick="document.getElementById('todoAddInput').focus()" style="background:transparent; border:none; color:#38BDF8; font-size:12px; font-weight:600">[+ Add]</button>
             </div>
-            <div id="agendaList" style="display:flex; flex-direction:column; gap:8px">
-              <div style="font-size:12px; color:#98A4B5">No events scheduled today.</div>
-            </div>
-          </div>
-          <div style="flex:1; display:flex; flex-direction:column; gap:10px; padding:16px; border-radius:24px; background:linear-gradient(180deg,#353B46,#272C35); border:1px solid rgba(150,165,185,0.28)">
-            <div style="display:flex; justify-content:space-between; align-items:center">
-              <div style="font-family:'Michroma',sans-serif; font-size:11px; letter-spacing:0.1em; text-transform:uppercase; color:#DCE4EE">◆ Todos</div>
-              <div id="todoCount" style="font-size:12px; color:#98A4B5">0 of 0 done</div>
-            </div>
-            <div style="height:4px; border-radius:999px; background:#14171C; overflow:hidden"><div id="todoBar" style="width:0%; height:100%; background:linear-gradient(90deg,#1F6FA8,#7AD0F5)"></div></div>
-            <div id="todoList" style="display:flex; flex-direction:column; gap:6px">
-              <div style="font-size:12px; color:#98A4B5">No to-dos added yet.</div>
-            </div>
+            <div style="height:3px; border-radius:999px; background:rgba(15,23,42,0.8); overflow:hidden"><div id="todoBar" style="width:0%; height:100%; background:linear-gradient(90deg,#2563EB,#38BDF8)"></div></div>
+            <div id="todoList" style="display:flex; flex-direction:column; gap:6px; font-size:12.5px; color:#CBD5E1"></div>
             <div style="display:flex; gap:6px; margin-top:auto">
-              <input id="todoAddInput" type="text" placeholder="Add to-do..." style="flex:1; min-width:0; padding:6px 10px; border-radius:999px; border:1px solid rgba(150,165,185,0.28); background:#14171C; color:#E8EEF6; font-size:12px; outline:none" onkeydown="if(event.key==='Enter')addTodo()">
-              <button onclick="addTodo()" class="pill-btn-steel" style="height:28px; padding:0 12px; font-size:12px">+</button>
+              <input id="todoAddInput" type="text" placeholder="Add to-do..." style="flex:1; min-width:0; padding:6px 10px; border-radius:8px; border:1px solid rgba(148,163,184,0.22); background:rgba(9,15,26,0.75); color:#E8EEF6; font-size:12px; outline:none" onkeydown="if(event.key==='Enter')addTodo()">
+              <button onclick="addTodo()" class="pill-btn-steel" style="height:28px; padding:0 10px; font-size:12px">+</button>
+            </div>
+          </div>
+
+          <!-- Agent Pipeline Card -->
+          <div class="glass-card" style="padding:12px 14px; display:flex; flex-direction:column; gap:8px">
+            <div style="font-size:13px; font-weight:600; color:#E2E8F0">Agent Pipeline</div>
+            <div style="display:flex; justify-content:space-between; align-items:center; font-family:'JetBrains Mono',monospace; font-size:11.5px; color:#94A3B8">
+              <span id="pipelineLabel">[@planner -&gt; @coder</span>
+              <span id="pipelinePct">0%]</span>
+            </div>
+            <div style="height:4px; border-radius:999px; background:rgba(15,23,42,0.85); overflow:hidden">
+              <div id="pipelineBar" style="width:18%; height:100%; background:linear-gradient(90deg,#38BDF8,#818CF8)"></div>
             </div>
           </div>
         </div>
       </div>
 
-      <!-- Bottom bar -->
-      <div style="display:flex; align-items:center; justify-content:space-between; margin-top:16px; flex-wrap:wrap; gap:12px">
-        <div style="display:flex; align-items:center; gap:8px">
-          <button class="tab-pill active">Ask Aura</button>
-          <button class="tab-pill" onclick="location.href='/'">Full Web UI</button>
+      <!-- Bottom Live Hardware Telemetry Status Strip (Photos 1 & 3) -->
+      <div style="display:flex; align-items:center; justify-content:space-between; padding-top:6px; border-top:1px solid rgba(148,163,184,0.16); font-size:12px; color:#94A3B8; flex-wrap:wrap; gap:10px">
+        <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap">
+          <span style="display:inline-flex; align-items:center; gap:5px; color:#CBD5E1"><span style="color:#10B981">●</span> Ollama</span>
+          <span style="color:rgba(148,163,184,0.35)">|</span>
+          <span id="teleCpu">CPU: 24%</span>
+          <span style="color:rgba(148,163,184,0.35)">|</span>
+          <span id="teleRam">RAM: 58%</span>
+          <span style="color:rgba(148,163,184,0.35)">|</span>
+          <span id="teleGpu">GPU: 61%</span>
+          <span style="color:rgba(148,163,184,0.35)">|</span>
+          <span id="teleVram">VRAM: 34%</span>
         </div>
-        <div id="statusMeta" style="font-family:'JetBrains Mono',monospace; font-size:12px; color:#98A4B5">Ready · Enter to send</div>
+        <div id="statusMeta" style="display:flex; align-items:center; gap:10px">
+          <span style="display:inline-flex; align-items:center; gap:5px; color:#93C5FD"><span style="color:#38BDF8">●</span> <span id="teleRw">RW: Read-Write</span></span>
+          <span style="color:rgba(148,163,184,0.35)">|</span>
+          <span id="teleBat">🔋 Battery 95%</span>
+        </div>
       </div>
     </div>
   </div>
 </div>
 
 <script>
-  let selectedRole = 'planner', turns = 0, phase = 0, busy = false;
-  document.getElementById('agendaDate').textContent = new Date().toLocaleDateString('en-GB', { weekday:'short', day:'numeric', month:'short' });
+  if (window.gsap && window.Flip) {
+    gsap.registerPlugin(window.Flip);
+  }
+  let selectedRole = 'planner', turns = 0, phase = 0, busy = false, isReadOnly = false;
+  const agDateEl = document.getElementById('agendaDate');
+  if (agDateEl) agDateEl.textContent = new Date().toLocaleDateString('en-GB', { weekday:'short', day:'numeric', month:'short' });
 
-  function wavePath(w, h, amp, ph, mult) {
-    const mid = h / 2; let d = '';
-    for (let i = 0; i <= 40; i++) {
-      const u = i / 40, x = (u * w).toFixed(1), env = Math.exp(-Math.pow((u - 0.5) / 0.24, 2));
-      const y = (mid - amp * env * (0.7 * Math.sin((u * 6.5 - ph * mult) * Math.PI) + 0.3 * Math.cos((u * 13 + ph * 1.4) * Math.PI))).toFixed(1);
-      d += (i === 0 ? 'M' : 'L') + x + ',' + y + ' ';
+  // Render symmetric multi-bar waveform with dotted center horizon (Photo 2)
+  function renderPillWaveforms() {
+    phase += busy ? 0.22 : 0.07;
+    document.querySelectorAll('.pill-wave-svg').forEach((svg, idx) => {
+      const color = svg.getAttribute('data-color') || '#38BDF8';
+      const core = svg.getAttribute('data-core') || '#E0F2FE';
+      const bars = 38, w = 230, h = 36, mid = h / 2;
+      let markup = `<line x1="8" y1="${mid}" x2="${w-8}" y2="${mid}" stroke="${color}" stroke-opacity="0.35" stroke-dasharray="2 3" stroke-width="1"/>`;
+      for (let i = 0; i < bars; i++) {
+        const u = i / (bars - 1);
+        const x = 14 + u * (w - 28);
+        const env1 = Math.exp(-Math.pow((u - 0.5) / 0.17, 2));
+        const env2 = 0.55 * Math.exp(-Math.pow((u - 0.22) / 0.08, 2)) + 0.55 * Math.exp(-Math.pow((u - 0.78) / 0.08, 2));
+        const wave = Math.abs(Math.sin((u * 11 + phase + idx * 0.7) * Math.PI) * 0.75 + Math.cos((u * 23 - phase * 1.3) * Math.PI) * 0.35);
+        const amp = Math.max(1.5, ((busy ? 15 : 12.5) * (env1 + env2) * (0.45 + 0.65 * wave)));
+        const y1 = (mid - amp).toFixed(1), y2 = (mid + amp).toFixed(1);
+        const stroke = amp > 8.5 ? core : color;
+        markup += `<line x1="${x.toFixed(1)}" y1="${y1}" x2="${x.toFixed(1)}" y2="${y2}" stroke="${stroke}" stroke-width="2" stroke-linecap="round" opacity="${(0.55 + 0.45 * Math.min(1, amp / 12)).toFixed(2)}"/>`;
+      }
+      svg.innerHTML = markup;
+    });
+    requestAnimationFrame(renderPillWaveforms);
+  }
+  renderPillWaveforms();
+
+  function setPersona(mode) {
+    document.body.setAttribute('data-persona', mode);
+    const orb = document.getElementById('headerOrb');
+    if (orb) orb.className = 'galaxy-orb ' + mode;
+    const lbl = document.getElementById('personaModeLabel');
+    if (lbl) lbl.textContent = mode === 'ultron' ? 'Ultron Mode' : (mode === 'megatron' ? 'Megatron Mode' : 'Cyber Blue');
+    if (window.gsap) {
+      gsap.fromTo('#expandedShell .glass-shell', { scale: 0.992, opacity: 0.88 }, { scale: 1, opacity: 1, duration: 0.32, ease: 'power3.out' });
     }
-    return d;
   }
-  function anim() {
-    phase += busy ? 0.16 : 0.05;
-    const amp = busy ? 11.5 : 5.5;
-    document.getElementById('filCompactMain').setAttribute('d', wavePath(150, 36, amp, phase, 0.9));
-    document.getElementById('filCompactDim').setAttribute('d', wavePath(150, 36, amp * 0.6, -phase, 0.6));
-    document.getElementById('filHdrMain').setAttribute('d', wavePath(210, 36, amp, phase, 0.9));
-    document.getElementById('filHdrDim').setAttribute('d', wavePath(210, 36, amp * 0.6, -phase, 0.6));
-    requestAnimationFrame(anim);
-  }
-  anim();
 
+  function togglePopover(id) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.classList.toggle('open');
+  }
+  function closeAllPopovers() {
+    document.querySelectorAll('.popover-card').forEach(el => el.classList.remove('open'));
+  }
+  function switchIslandTab(btn, tab) {
+    document.querySelectorAll('.top-nav-capsule .nav-tab').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    if (tab === 'agents') togglePopover('agentPopover');
+    if (tab === 'hub') sendQuick('morning briefing');
+  }
+  async function toggleRwMode() {
+    isReadOnly = !isReadOnly;
+    const txt = document.getElementById('rwToggleText');
+    const tele = document.getElementById('teleRw');
+    if (txt) txt.textContent = isReadOnly ? '🔒 RO Mode: ON' : '⚡ RW Mode: ON';
+    if (tele) tele.textContent = isReadOnly ? 'RO: Read-Only' : 'RW: Read-Write';
+    try {
+      await fetch('/api/mode', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ read_only: isReadOnly }) });
+    } catch (_) {}
+  }
+  function toggleVoiceMic() {
+    const vl = document.getElementById('voiceLabel');
+    if (vl) vl.textContent = vl.textContent.includes('Listening') ? 'Ultron voice · ready' : 'Ultron · Listening...';
+  }
   function setShutter(on) {
     document.getElementById('expandedShell').style.opacity = on ? '0.28' : '1';
     document.getElementById('voiceLabel').textContent = on ? 'Ultron · Shuttered' : 'Ultron voice · ready';
   }
-  function toggleModelMenu() { document.getElementById('modelMenu').classList.toggle('open'); }
+  function toggleModelMenu() { togglePopover('modelMenu'); }
   async function pickModel(spec, label) {
     document.getElementById('modelMenu').classList.remove('open');
     document.getElementById('modelLabel').textContent = label;
-    document.getElementById('compactModelBtn').textContent = spec.split('/').pop();
+    const cmb = document.getElementById('compactModelBtn');
+    if (cmb) cmb.textContent = spec.split('/').pop();
     await fetch('/api/model', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ low_vram:false, model_override: spec }) });
   }
   function pickAgentChip(btn, role) {
     selectedRole = role;
-    document.querySelectorAll('.agent-chip').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('#agentPopover .pop-item').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
+    const lbl = document.getElementById('agentBtnLabel');
+    if (lbl) lbl.textContent = '@' + role;
   }
   function toggleReasoning() {
     const el = document.getElementById('reasoningTrace');
@@ -4125,83 +4434,33 @@ _ISLAND_HTML = r"""<!DOCTYPE html>
   function renderDashboard(snap) {
     if (!snap || typeof snap !== 'object') return;
     const bList = document.getElementById('briefingList');
-    if (bList && Array.isArray(snap.briefing)) {
+    if (bList && Array.isArray(snap.briefing) && snap.briefing.length) {
       bList.textContent = '';
-      (snap.briefing.length ? snap.briefing : ['No workspace summary yet.']).forEach(line => {
+      snap.briefing.forEach(line => {
         const d = document.createElement('div');
-        d.textContent = '◆ ' + line;
+        d.textContent = '• ' + line;
         bList.appendChild(d);
       });
-    }
-    const gList = document.getElementById('gmailList');
-    if (gList && Array.isArray(snap.gmail)) {
-      gList.textContent = '';
-      if (!snap.gmail.length) {
-        const d = document.createElement('div');
-        d.style.cssText = 'font-size:12px;color:#98A4B5';
-        d.textContent = 'Gmail not connected — open Apps to link Gmail.';
-        gList.appendChild(d);
-      } else {
-        snap.gmail.forEach(m => {
-          const box = document.createElement('div');
-          box.style.cssText = 'display:flex;flex-direction:column;gap:4px;padding:10px 12px;border-radius:14px;background:linear-gradient(180deg,#14171C,#1B1F26)';
-          const hdr = document.createElement('div');
-          hdr.style.cssText = 'display:flex;justify-content:space-between;font-size:13px;font-weight:500';
-          const sp1 = document.createElement('span'); sp1.textContent = m.sender || 'Gmail';
-          const sp2 = document.createElement('span'); sp2.style.cssText = 'font-size:11px;color:#98A4B5'; sp2.textContent = m.time || '';
-          hdr.appendChild(sp1); hdr.appendChild(sp2);
-          const sub = document.createElement('div'); sub.style.cssText = 'font-size:12px;color:#98A4B5'; sub.textContent = m.subject || '';
-          box.appendChild(hdr); box.appendChild(sub);
-          gList.appendChild(box);
-        });
-      }
-    }
-    const aList = document.getElementById('agendaList');
-    if (aList && Array.isArray(snap.agenda)) {
-      aList.textContent = '';
-      if (!snap.agenda.length) {
-        const d = document.createElement('div');
-        d.style.cssText = 'font-size:12px;color:#98A4B5';
-        d.textContent = 'No events scheduled today.';
-        aList.appendChild(d);
-      } else {
-        snap.agenda.forEach(ev => {
-          const row = document.createElement('div');
-          row.style.cssText = 'display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:14px;background:linear-gradient(180deg,#14171C,#1B1F26)';
-          const tm = document.createElement('div'); tm.style.cssText = 'width:68px;font-size:11px;color:#6FCBF4;line-height:1.25'; tm.textContent = ev.start_time || 'Today';
-          const tt = document.createElement('div'); tt.style.cssText = 'flex:1;font-size:13px;font-weight:500'; tt.textContent = ev.title || '';
-          row.appendChild(tm); row.appendChild(tt);
-          aList.appendChild(row);
-        });
-      }
     }
     const tList = document.getElementById('todoList');
     if (tList && Array.isArray(snap.todos)) {
       tList.textContent = '';
       const total = snap.todos.length;
       const done = snap.todos.filter(t => t.done).length;
-      document.getElementById('todoCount').textContent = `${done} of ${total} done`;
+      document.getElementById('todoCount').textContent = `(${done}/${total})`;
       document.getElementById('todoBar').style.width = total ? `${Math.round((done / total) * 100)}%` : '0%';
-      if (!total) {
-        const d = document.createElement('div');
-        d.style.cssText = 'font-size:12px;color:#98A4B5';
-        d.textContent = 'No to-dos added yet.';
-        tList.appendChild(d);
-      } else {
-        snap.todos.forEach(item => {
-          const lbl = document.createElement('label');
-          lbl.style.cssText = 'display:flex;align-items:center;gap:10px;font-size:13px;cursor:pointer';
-          const chk = document.createElement('input');
-          chk.type = 'checkbox';
-          chk.className = 'todo-chk';
-          chk.checked = !!item.done;
-          chk.style.cssText = 'width:16px;height:16px;accent-color:#6FCBF4';
-          chk.onchange = () => toggleTodo(item.text, chk.checked);
-          lbl.appendChild(chk);
-          lbl.appendChild(document.createTextNode(item.text || ''));
-          tList.appendChild(lbl);
-        });
-      }
+      snap.todos.forEach(item => {
+        const lbl = document.createElement('label');
+        lbl.style.cssText = 'display:flex;align-items:center;gap:8px;font-size:12.5px;cursor:pointer';
+        const chk = document.createElement('input');
+        chk.type = 'checkbox';
+        chk.checked = !!item.done;
+        chk.style.cssText = 'width:14px;height:14px;accent-color:#38BDF8';
+        chk.onchange = () => toggleTodo(item.text, chk.checked);
+        lbl.appendChild(chk);
+        lbl.appendChild(document.createTextNode(item.text || ''));
+        tList.appendChild(lbl);
+      });
     }
   }
   async function loadDashboard() {
@@ -4211,6 +4470,16 @@ _ISLAND_HTML = r"""<!DOCTYPE html>
       if (snap && snap.apps) syncIslandApps(snap.apps);
     } catch (_) {}
   }
+  async function pollTelemetry() {
+    try {
+      const t = await (await fetch('/api/telemetry')).json();
+      if (typeof t.cpu_percent === 'number') document.getElementById('teleCpu').textContent = `CPU: ${Math.round(t.cpu_percent)}%`;
+      if (typeof t.ram_percent === 'number') document.getElementById('teleRam').textContent = `RAM: ${Math.round(t.ram_percent)}%`;
+      if (typeof t.gpu_util_percent === 'number') document.getElementById('teleGpu').textContent = `GPU: ${Math.round(t.gpu_util_percent)}%`;
+      if (typeof t.vram_percent === 'number') document.getElementById('teleVram').textContent = `VRAM: ${Math.round(t.vram_percent)}%`;
+    } catch (_) {}
+  }
+  setInterval(pollTelemetry, 3000);
   async function addTodo() {
     const inp = document.getElementById('todoAddInput');
     const txt = (inp && inp.value || '').trim();
@@ -4236,11 +4505,8 @@ _ISLAND_HTML = r"""<!DOCTYPE html>
     const g = apps.gmail || {}, c = apps.calendar || {};
     const gc = document.getElementById('islGmailChk'); if (gc) gc.checked = !!g.enabled;
     const cc = document.getElementById('islCalChk'); if (cc) cc.checked = !!c.enabled;
-    const gs = document.getElementById('islGmailState'); if (gs) gs.textContent = g.connected ? (g.account || 'On') : 'Off';
-    const cs = document.getElementById('islCalState'); if (cs) cs.textContent = c.connected ? (c.source || 'On') : 'Local';
-    const btn = document.getElementById('islandAppsBtn');
-    const n = (g.connected ? 1 : 0) + (c.connected ? 1 : 0);
-    if (btn) btn.textContent = n ? `⊞ Apps · ${n}` : '⊞ Apps';
+    const gs = document.getElementById('islGmailState'); if (gs) gs.textContent = g.connected ? `(${g.account || 'On'})` : '(Off)';
+    const cs = document.getElementById('islCalState'); if (cs) cs.textContent = c.connected ? `(${c.source || 'On'})` : '(Local)';
   }
   async function toggleIslandApp(kind, enabled) {
     const body = kind === 'gmail' ? { gmail_enabled: !!enabled } : { calendar_enabled: !!enabled };
@@ -4266,18 +4532,31 @@ _ISLAND_HTML = r"""<!DOCTYPE html>
       if (data.apps) syncIslandApps(data.apps);
       if (data.dashboard) renderDashboard(data.dashboard);
       document.getElementById('islGmailPass').value = '';
+      toggleAppsPanel();
     } catch (_) {}
   }
   function addBubble(who, text) {
     const log = document.getElementById('chatLog');
-    const div = document.createElement('div');
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;gap:12px;align-items:flex-start';
+    const av = document.createElement('div');
     if (who === 'user') {
-      div.style.cssText = 'align-self:flex-end;max-width:78%;padding:10px 15px;border-radius:18px 18px 6px 18px;background:linear-gradient(180deg,#3C4350,#2E343E);border:1px solid rgba(150,165,185,0.3);font-size:14px';
+      av.style.cssText = 'width:28px;height:28px;border-radius:50%;background:rgba(30,41,59,0.75);border:1px solid rgba(148,163,184,0.35);display:flex;align-items:center;justify-content:center;font-size:12px;color:#CBD5E1;flex:none';
+      av.textContent = '👤';
     } else {
-      div.style.cssText = 'padding:10px 14px;border-radius:14px;background:rgba(255,255,255,0.03);font-size:14px;line-height:1.55;white-space:pre-wrap';
+      av.style.cssText = 'width:28px;height:28px;border-radius:50%;border:1.5px solid #38BDF8;background:radial-gradient(circle at 50% 50%,#E0F2FE 0%,#38BDF8 30%,#0F172A 80%);box-shadow:0 0 12px rgba(56,189,248,0.45);flex:none';
     }
-    div.textContent = text;
-    log.appendChild(div);
+    const col = document.createElement('div');
+    col.style.cssText = 'display:flex;flex-direction:column;gap:4px';
+    const nm = document.createElement('div');
+    nm.style.cssText = 'font-size:13px;font-weight:600;color:#E2E8F0';
+    nm.textContent = who === 'user' ? 'You' : 'AURA';
+    const msg = document.createElement('div');
+    msg.style.cssText = 'font-size:14px;color:#DCE6F2;line-height:1.55;white-space:pre-wrap';
+    msg.textContent = text;
+    col.appendChild(nm); col.appendChild(msg);
+    row.appendChild(av); row.appendChild(col);
+    log.appendChild(row);
     log.scrollTop = log.scrollHeight;
   }
   function sendQuick(p) {
@@ -4294,12 +4573,16 @@ _ISLAND_HTML = r"""<!DOCTYPE html>
     busy = true;
     addBubble('user', prompt);
     document.getElementById('voiceLabel').textContent = 'Ultron · Thinking';
+    document.getElementById('pipelinePct').textContent = '50%]';
+    document.getElementById('pipelineBar').style.width = '55%';
     try {
       const res = await fetch('/api/chat', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ prompt, agent_role: selectedRole }) });
       const data = await res.json();
       turns += 1;
-      document.getElementById('toolsBadge').textContent = `${turns} turn${turns === 1 ? '' : 's'}`;
+      document.getElementById('toolsBadge').textContent = `${turns} tool${turns === 1 ? '' : 's'} called`;
       document.getElementById('reasoningTrace').textContent = data.metrics || 'Completed';
+      document.getElementById('pipelinePct').textContent = '100%]';
+      document.getElementById('pipelineBar').style.width = '100%';
       addBubble('ai', data.answer || '(done)');
     } catch (e) {
       addBubble('ai', 'Error: ' + e);
@@ -4335,11 +4618,17 @@ _ISLAND_HTML = r"""<!DOCTYPE html>
     try {
       const st = await (await fetch('/api/status')).json();
       const mod = st.model_override || (st.roles && st.roles.lightweight) || 'qwen3.5:4b';
-      document.getElementById('modelLabel').textContent = `${mod} · Ollama`;
-      document.getElementById('compactModelBtn').textContent = mod;
-      document.getElementById('statusMeta').textContent = `${st.read_only ? 'RO' : 'RW'} · ${st.tools_count || 0} MCP tools · Enter to send`;
+      document.getElementById('modelLabel').textContent = mod.split('/').pop();
+      const cmb = document.getElementById('compactModelBtn');
+      if (cmb) cmb.textContent = mod;
+      isReadOnly = !!st.read_only;
+      const txt = document.getElementById('rwToggleText');
+      const tele = document.getElementById('teleRw');
+      if (txt) txt.textContent = isReadOnly ? '🔒 RO Mode: ON' : '⚡ RW Mode: ON';
+      if (tele) tele.textContent = isReadOnly ? 'RO: Read-Only' : 'RW: Read-Write';
     } catch (_) {}
     loadDashboard();
+    pollTelemetry();
   })();
 </script>
 </body>

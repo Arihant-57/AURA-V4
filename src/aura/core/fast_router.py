@@ -355,6 +355,14 @@ class FastResult:
     latency_ms: float = 0.0
 
 
+_GIT_CLONE_RE = re.compile(
+    r"^\s*(?:please\s+|can\s+you\s+)?(?:git\s+clone|clone(?:\s+(?:the|a|this))?(?:\s+(?:git|github)\s+)?(?:\s+repo(?:sitory)?)?)\s+"
+    r"(?P<repo>(?:https?://[^\s\"']+|git@[^\s\"']+|[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+))"
+    r"(?:\s+(?:(?:into|to|in|on)\s+)?(?P<dest>[^\s\"']+))?\s*$",
+    re.IGNORECASE,
+)
+
+
 class FastRouter:
     """Zero-LLM deterministic router with SSD-backed custom shortcuts."""
 
@@ -533,6 +541,35 @@ class FastRouter:
             act = m_bind.group("action").strip()
             self.save_shortcut(trig, act)
             return _done(f"Saved shortcut: '{trig}' -> '{act}'.", "shortcut_save")
+
+        # 0b. Deterministic git clone with disk verification (prevents typing into Dynamic Island search box).
+        m_clone = _GIT_CLONE_RE.match(clean) or _GIT_CLONE_RE.match(norm)
+        if m_clone:
+            if read_only:
+                return _done("READ-ONLY BLOCKED: Switch to RW mode to clone a git repository.", "git_clone_blocked_ro")
+            repo_spec = (m_clone.group("repo") or "").strip()
+            dest_token = (m_clone.group("dest") or "").strip()
+            dest_dir: Path | None = None
+            if dest_token:
+                low_dest = dest_token.lower().rstrip("/\\")
+                home = Path.home()
+                if low_dest in {"desktop", "my desktop"}:
+                    dest_dir = home / "Desktop"
+                elif low_dest in {"documents", "my documents", "docs"}:
+                    dest_dir = home / "Documents"
+                elif low_dest in {"downloads", "my downloads"}:
+                    dest_dir = home / "Downloads"
+                else:
+                    cand = Path(dest_token).expanduser()
+                    dest_dir = cand if cand.is_absolute() else (Path.cwd() / cand)
+            from ..mcp.desktop_server import execute_verified_git_clone
+
+            out = execute_verified_git_clone(
+                repo_spec=repo_spec,
+                dest_dir=dest_dir,
+                read_only=False,
+            )
+            return _done(out, "git_clone")
 
         if ("/" in clean or "\\" in clean) and "http://" not in low and "https://" not in low:
             explicit_open = _parse_local_open_request(norm)

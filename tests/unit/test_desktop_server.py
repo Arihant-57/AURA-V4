@@ -647,4 +647,50 @@ def test_desktop_whatsapp_web_fallback_and_ui_see_text(monkeypatch):
         assert "def broken(): pass" in ocr_fb
 
 
+def test_type_text_refuses_aura_dynamic_island_and_focuses_terminal(monkeypatch, tmp_path):
+    import sys
+    from types import SimpleNamespace
+
+    written: list[str] = []
+    fake_pg = SimpleNamespace(
+        FAILSAFE=True,
+        write=lambda s, interval=0.01: written.append(s),
+        press=lambda k: written.append(f"<{k}>"),
+    )
+    monkeypatch.setitem(sys.modules, "pyautogui", fake_pg)
+
+    # 1. When AURA Dynamic Island has focus and no other target is found, block self-typing!
+    monkeypatch.setattr(ds, "_get_foreground_window_title", lambda: "AURA V4 · Dynamic Island")
+    monkeypatch.setattr(ds, "_focus_target_or_recent_window", lambda target="": None)
+    blocked = ds.type_text_impl("hello world", press_enter=True, read_only=False)
+    assert "Refusing to type into AURA's own search bar" in blocked
+    assert written == []
+
+    # 2. When AURA Dynamic Island has focus and a git clone command is typed, run verified git clone directly
+    cloned_calls: list[str] = []
+    monkeypatch.setattr(
+        ds,
+        "execute_verified_git_clone",
+        lambda spec, dest_dir=None, read_only=None: cloned_calls.append(spec) or "VERIFIED GIT CLONE: ok",
+    )
+    clone_out = ds.type_text_impl("git clone https://github.com/octocat/Hello-World.git", press_enter=True, read_only=False)
+    assert "VERIFIED GIT CLONE: ok" in clone_out
+    assert cloned_calls == ["git clone https://github.com/octocat/Hello-World.git"]
+    assert written == []
+
+    # 3. When MINGW64 terminal window is available, auto-focus it and type into MINGW64 instead of Dynamic Island
+    fg_state = {"title": "AURA V4 · Dynamic Island"}
+
+    def _focus_mingw(target=""):
+        fg_state["title"] = "MINGW64:/c/Users/ariha"
+        return {"hwnd": 99, "title": "MINGW64:/c/Users/ariha", "minimized": False}
+
+    monkeypatch.setattr(ds, "_get_foreground_window_title", lambda: fg_state["title"])
+    monkeypatch.setattr(ds, "_focus_target_or_recent_window", _focus_mingw)
+    ok_out = ds.type_text_impl("echo ready", press_enter=True, read_only=False, target="mingw64")
+    assert "MINGW64:/c/Users/ariha" in ok_out
+    assert written == ["echo ready", "<enter>"]
+
+
+
 
